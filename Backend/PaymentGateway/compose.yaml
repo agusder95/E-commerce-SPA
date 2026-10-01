@@ -1,0 +1,46 @@
+﻿#version: '3.8'
+
+services:
+  # 1. API (.NET)
+  paymentgateway-api:
+    build:
+      context: .
+      dockerfile: PaymentGateway.API/Dockerfile
+    container_name: paymentgateway-api
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      # IMPORTANTE: Aquí conectamos usando el nombre del servicio en el compose
+      - ConnectionStrings__DefaultConnection=Server=sql-server-db;Database=Order_Customer;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;
+      - ConnectionStrings__RedisConnection=redis-cache:6379
+    depends_on:
+      - sql-server-db
+      - redis-cache
+
+  # 2. Base de Datos (SQL Server)
+  sql-server-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sql-server-db
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sql-data:/var/opt/mssql
+
+  # 3. Caché (Redis)
+  redis-cache:
+    image: redis:alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+# Volúmenes para que los datos sobrevivan al apagar Docker
+volumes:
+  sql-data:
+  redis-data:

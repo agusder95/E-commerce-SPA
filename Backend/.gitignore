@@ -1,0 +1,30 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+**/TestResults/
+**/*.user
+**/*.suo
+
+# Local configuration and secrets
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/secrets*.json
+**/secrets*.yaml
+**/*.pfx
+**/*.p12
+**/*.pem
+**/*.key
+
+# Local Docker data and overrides
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+compose.override.yaml
+
+# Logs and local databases
+*.log
+*.db
+*.sqlite
+*.sqlite3
+logs/
