@@ -32,7 +32,7 @@ public partial class PaymentDbContext : DbContext
             entity.HasIndex(e => e.Email, "UQ__CUSTOMER__A9D10534B6608E56").IsUnique();
 
             entity.Property(e => e.IdCustomer).HasColumnName("Id_customer");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.Email).HasMaxLength(255).IsUnicode(false);
             entity
                 .Property(e => e.Role)
@@ -48,7 +48,7 @@ public partial class PaymentDbContext : DbContext
             entity.ToTable("ORDERS");
 
             entity.Property(e => e.IdOrder).HasColumnName("Id_order");
-            entity.Property(e => e.DatePurchase).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.DatePurchase).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.IdCustomer).HasColumnName("Id_customer");
             entity.Property(e => e.MercadoPagoPreferenceId).HasMaxLength(255).IsUnicode(false);
             entity
@@ -109,7 +109,7 @@ public partial class PaymentDbContext : DbContext
             entity.Property(e => e.Type).HasMaxLength(50);
             entity.Property(e => e.Thumbnail).HasMaxLength(255);
             entity.Property(e => e.DiscountPrice).HasColumnType("decimal(18, 2)");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
         });
 

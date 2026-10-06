@@ -6,7 +6,7 @@ Aplicación de comercio electrónico para la venta de productos digitales. El pr
 
 | Componente | Tecnología | Documentación |
 |---|---|---|
-| Backend | .NET 10, ASP.NET Core, Entity Framework Core, SQL Server y Redis | [Backend/README.md](Backend/README.md) |
+| Backend | .NET 10, ASP.NET Core, Entity Framework Core, PostgreSQL y Redis | [Backend/README.md](Backend/README.md) |
 | Frontend | React 19, Vite y React Router | [Frontend/PaymentFront/README.md](Frontend/PaymentFront/README.md) |
 
 ## Funcionalidades
@@ -24,7 +24,7 @@ Aplicación de comercio electrónico para la venta de productos digitales. El pr
 
 - [Node.js](https://nodejs.org/) 20 o superior y npm.
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) para SQL Server y Redis.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) para PostgreSQL y Redis.
 - Una cuenta de Mercado Pago y un proveedor SMTP para probar el flujo completo.
 
 ## Estructura del repositorio
@@ -51,7 +51,7 @@ E-commerce-SPA/
 
 ### 1. Preparar el Backend
 
-Seguir las instrucciones de [Backend/README.md](Backend/README.md) para crear la configuración local, levantar SQL Server y Redis, aplicar las migraciones y ejecutar la API.
+Seguir las instrucciones de [Backend/README.md](Backend/README.md) para crear la configuración local, levantar PostgreSQL y Redis, aplicar las migraciones y ejecutar la API.
 
 La API queda disponible por defecto en:
 

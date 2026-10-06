@@ -46,7 +46,7 @@ public class CheckoutController : ControllerBase
                 .ToList(),
         };
 
-        // 2. Guarda en SQL Server
+        // 2. Guarda en PostgreSQL
         var createdOrder = await _orderRepository.CreateOrderAsync(newOrder);
 
         // 3. Genera Preferencia en Mercado Pago

@@ -12,12 +12,12 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-//Contenedor de Dependencias SQL
+//Contenedor de Dependencias PostgreSQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 builder.Services.AddDbContext<PaymentDbContext>(options =>
 {
-    options.UseSqlServer(connectionString);
+    options.UseNpgsql(connectionString);
 });
 
 //Contenedor de Dependencias Redis

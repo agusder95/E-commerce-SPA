@@ -7,6 +7,9 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["PaymentGateway.API/PaymentGateway.API.csproj", "PaymentGateway.API/"]
+COPY ["PaymentGateway.Infrastructure/PaymentGateway.Infrastructure.csproj", "PaymentGateway.Infrastructure/"]
+COPY ["PaymentGateway.Application/PaymentGateway.Application.csproj", "PaymentGateway.Application/"]
+COPY ["PaymentGateway.Domain/PaymentGateway.Domain.csproj", "PaymentGateway.Domain/"]
 RUN dotnet restore "PaymentGateway.API/PaymentGateway.API.csproj"
 COPY . .
 WORKDIR "/src/PaymentGateway.API"

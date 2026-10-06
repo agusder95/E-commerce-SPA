@@ -37,15 +37,23 @@ cp PaymentGateway.API/appsettings.Development.example.json \
 
 Completar `appsettings.Development.json` con las cadenas de conexión, el token de Mercado Pago, una clave JWT de al menos 32 caracteres y la configuración SMTP. Los archivos locales están excluidos por Git. Nunca subir tokens, contraseñas ni claves privadas.
 
+En `.env`, definir `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` y `POSTGRES_PORT` (5432 por defecto). Si el puerto está ocupado, elegir otro y usarlo también en la conexión local:
+
+```text
+Host=localhost;Port=5432;Database=Order_Customer;Username=paymentgateway;Password=<tu-contraseña>;
+```
+
+La API ejecutada con Docker usa `Host=postgres-db`. Las fechas se almacenan como `timestamp with time zone`; usar valores UTC al guardar fechas desde .NET.
+
 ## Ejecutar la infraestructura
 
 Desde `Backend/PaymentGateway`:
 
 ```bash
-docker compose up -d sql-server-db redis-cache
+docker compose up -d postgres-db redis-cache
 ```
 
-Esto levanta SQL Server en `localhost:1433` y Redis en `localhost:6379`. Para detenerlos:
+Esto levanta PostgreSQL 17 en `localhost:5432` y Redis en `localhost:6379` por defecto. Se pueden cambiar los puertos publicados con `POSTGRES_PORT` y `REDIS_PORT` en `.env`; actualizar también las conexiones locales en `appsettings.Development.json`. Para detenerlos:
 
 ```bash
 docker compose down
@@ -56,9 +64,7 @@ docker compose down
 ```bash
 dotnet restore
 dotnet tool restore
-dotnet ef migrations add InitialCreate \
-  --project PaymentGateway.Infrastructure \
-  --startup-project PaymentGateway.API
+export ConnectionStrings__DefaultConnection='Host=localhost;Port=5432;Database=Order_Customer;Username=paymentgateway;Password=<tu-contraseña>;'
 dotnet ef database update \
   --project PaymentGateway.Infrastructure \
   --startup-project PaymentGateway.API
@@ -66,6 +72,18 @@ dotnet run --project PaymentGateway.API
 ```
 
 La API queda disponible en `http://localhost:5076` y Swagger en `http://localhost:5076/swagger`.
+
+La migración inicial de PostgreSQL está incluida en el repositorio: `database update` crea las tablas de clientes, productos, órdenes y sus ítems. La base comienza vacía; no se importan datos de SQL Server. El catálogo necesita productos cargados para poder probar compras.
+
+Para futuras modificaciones del modelo:
+
+```bash
+dotnet ef migrations add NombreDelCambio \
+  --project PaymentGateway.Infrastructure \
+  --startup-project PaymentGateway.API
+```
+
+La fábrica de contexto para migraciones lee `ConnectionStrings__DefaultConnection`; no necesita iniciar los servicios de Mercado Pago, SMTP ni Redis.
 
 ## Webhook de Mercado Pago
 

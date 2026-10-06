@@ -12,35 +12,42 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       # IMPORTANTE: Aquí conectamos usando el nombre del servicio en el compose
-      - ConnectionStrings__DefaultConnection=Server=sql-server-db;Database=Order_Customer;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;
+      - ConnectionStrings__DefaultConnection=Host=postgres-db;Port=5432;Database=${POSTGRES_DB:-Order_Customer};Username=${POSTGRES_USER:-paymentgateway};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env};
       - ConnectionStrings__RedisConnection=redis-cache:6379
     depends_on:
-      - sql-server-db
-      - redis-cache
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
 
-  # 2. Base de Datos (SQL Server)
-  sql-server-db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: sql-server-db
+  # 2. Base de Datos (PostgreSQL)
+  postgres-db:
+    image: postgres:17
+    container_name: paymentgateway-postgres
     environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
-      - MSSQL_PID=Developer
+      - POSTGRES_DB=${POSTGRES_DB:-Order_Customer}
+      - POSTGRES_USER=${POSTGRES_USER:-paymentgateway}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "1433:1433"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - sql-data:/var/opt/mssql
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # 3. Caché (Redis)
   redis-cache:
     image: redis:alpine
     container_name: redis-cache
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
 
 # Volúmenes para que los datos sobrevivan al apagar Docker
 volumes:
-  sql-data:
+  postgres-data:
   redis-data:
