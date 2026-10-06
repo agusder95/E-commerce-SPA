@@ -1,129 +1,116 @@
-# Backend — Payment Gateway API
+# Payment Gateway API
 
-API REST construida con .NET 10 siguiendo los principios de Clean Architecture. Maneja autenticación por PIN, procesamiento de pagos con MercadoPago y gestión de órdenes de compra.
+Backend de la aplicación de comercio electrónico. Es una API REST desarrollada con .NET 10 y organizada por capas. Gestiona autenticación por PIN, clientes, órdenes y pagos mediante Mercado Pago.
 
-## Prerrequisitos
+## Requisitos
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- [Docker](https://www.docker.com/) (para SQL Server y Redis)
-- [ngrok](https://ngrok.com/) (para webhooks de MercadoPago)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Una cuenta de Mercado Pago para probar pagos y webhooks
+- Un proveedor SMTP o una cuenta de Gmail con contraseña de aplicación
+- [ngrok](https://ngrok.com/) para recibir webhooks durante el desarrollo local
 
-## Inicio desde cero (clone recién clonado)
+## Estructura
 
-### 1. Levantar infraestructura
-
-Desde la carpeta `PaymentGateway/`:
-
-```bash
-docker compose up -d
+```text
+Backend/
+└── PaymentGateway/
+    ├── PaymentGateway.API            # Controllers, configuración y middleware
+    ├── PaymentGateway.Application    # DTOs e interfaces
+    ├── PaymentGateway.Domain         # Entidades y reglas del dominio
+    ├── PaymentGateway.Infrastructure # Persistencia y servicios externos
+    ├── compose.yaml
+    └── PaymentGateway.sln
 ```
 
-Esto levanta:
-- **SQL Server 2022** en `localhost:1433`
-- **Redis** en `localhost:6379`
+`Domain` no depende de otras capas. `Application` define contratos, `Infrastructure` los implementa y `API` expone la funcionalidad HTTP.
 
-### 2. Restaurar dependencias
+## Configuración local
+
+Desde `Backend/PaymentGateway`, crear los archivos locales a partir de los ejemplos:
+
+```bash
+cp .env.example .env
+cp PaymentGateway.API/appsettings.Development.example.json \
+   PaymentGateway.API/appsettings.Development.json
+```
+
+Completar `appsettings.Development.json` con las cadenas de conexión, el token de Mercado Pago, una clave JWT de al menos 32 caracteres y la configuración SMTP. Los archivos locales están excluidos por Git. Nunca subir tokens, contraseñas ni claves privadas.
+
+## Ejecutar la infraestructura
+
+Desde `Backend/PaymentGateway`:
+
+```bash
+docker compose up -d sql-server-db redis-cache
+```
+
+Esto levanta SQL Server en `localhost:1433` y Redis en `localhost:6379`. Para detenerlos:
+
+```bash
+docker compose down
+```
+
+## Restaurar, migrar y ejecutar
 
 ```bash
 dotnet restore
-```
-
-### 3. Configurar la base de datos
-
-Como no hay migraciones en el repositorio, es necesario generarlas:
-
-```bash
+dotnet tool restore
 dotnet ef migrations add InitialCreate \
   --project PaymentGateway.Infrastructure \
   --startup-project PaymentGateway.API
-
 dotnet ef database update \
   --project PaymentGateway.Infrastructure \
   --startup-project PaymentGateway.API
+dotnet run --project PaymentGateway.API
 ```
 
-### 4. Configurar variables
+La API queda disponible en `http://localhost:5076` y Swagger en `http://localhost:5076/swagger`.
 
-Editar el archivo `PaymentGateway.API/appsettings.Development.json` con los valores correspondientes:
+## Webhook de Mercado Pago
 
-| Sección | Descripción |
-|---------|------------|
-| `ConnectionStrings:DefaultConnection` | Cadena de conexión a SQL Server |
-| `ConnectionStrings:RedisConnection` | Dirección de Redis |
-| `MercadoPago:AccesToken` | Token de acceso de MercadoPago |
-| `JwtSettings:SecretKey` | Clave secreta para firmar JWT (mínimo 32 caracteres) |
-| `JwtSettings:Issuer` / `Audience` | Emisor y audiencia del JWT |
-| `EmailSettings:SmtpServer`, `Port`, `SenderEmail`, `SenderPassword` | Credenciales SMTP para envío de PINs |
-
-### 5. Configurar webhook de MercadoPago
-
-El webhook de notificaciones de pago está configurado en `PaymentGateway.Infrastructure/Services/MercadoPagoService.cs`. En desarrollo local se usa ngrok para exponer el endpoint:
+Para probar notificaciones desde una instalación local:
 
 ```bash
 ngrok http 5076
 ```
 
-Copiar la URL pública generada (ej: `https://xxxx.ngrok-free.dev`) y actualizar la propiedad `NotificationUrl` en `MercadoPagoService.cs`.
-
-### 6. Ejecutar la API
-
-```bash
-dotnet run --project PaymentGateway.API
-```
-
-La API arranca en `http://localhost:5076`. Swagger disponible en `http://localhost:5076/swagger`.
-
-## Estructura de proyectos
-
-```
-PaymentGateway/
-├── PaymentGateway.API              # Punto de entrada, controllers, middleware
-├── PaymentGateway.Application      # Interfaces (IOrderRepository, IEmailService, etc.) y DTOs
-├── PaymentGateway.Domain           # Entidades: Order, OrderItem, Customer
-├── PaymentGateway.Infrastructure   # Implementaciones: repositorios, servicios, persistencia (EF Core)
-├── compose.yaml                    # Docker Compose
-└── PaymentGateway.sln
-```
-
-La arquitectura sigue el patrón de dependencias invertidas:
-- **Domain** no depende de nada
-- **Application** solo depende de Domain
-- **Infrastructure** depende de Application y Domain
-- **API** depende de todas las capas
+Configurar la URL pública resultante como URL de notificación en `MercadoPagoService` y verificar que las URLs de retorno apunten al frontend local.
 
 ## Endpoints principales
 
 | Método | Ruta | Auth | Descripción |
-|--------|------|------|------------|
-| `POST` | `/api/auth/request-access` | No | Envía PIN de 6 dígitos al email (expira en 5 min) |
-| `POST` | `/api/auth/verify-access` | No | Valida PIN y devuelve JWT |
-| `POST` | `/api/checkout/create-order` | Sí | Crea orden + preferencia de MercadoPago |
-| `POST` | `/api/checkout/webhook` | No | Webhook de notificaciones de MercadoPago |
-| `GET` | `/api/Order/{idOrder}` | No | Obtiene estado de una orden |
-| `GET` | `/api/orders/my-purchases` | Sí | Órdenes aprobadas del usuario |
-| `GET` | `/api/orders/my-purchases-pending` | Sí | Órdenes pendientes/canceladas del usuario |
+|---|---|---|---|
+| `POST` | `/api/auth/request-access` | No | Envía un PIN por email |
+| `POST` | `/api/auth/verify-access` | No | Valida el PIN y devuelve un JWT |
+| `GET` | `/api/products` | No | Lista los productos |
+| `GET` | `/api/products/{id}` | No | Obtiene un producto |
+| `POST` | `/api/checkout/create-order` | JWT | Crea una orden y preferencia de pago |
+| `POST` | `/api/checkout/webhook` | No | Recibe notificaciones de Mercado Pago |
+| `GET` | `/api/order/{idOrder}` | No | Consulta una orden |
+| `GET` | `/api/orders/my-purchases` | JWT | Lista las compras aprobadas |
+| `GET` | `/api/orders/my-purchases-pending` | JWT | Lista compras pendientes o canceladas |
 
-## Servicios del backend
+Para rutas protegidas:
 
-| Servicio | Descripción |
-|----------|------------|
-| `MercadoPagoService` | Creación de preferencias y verificación de pagos |
-| `SmtpEmailService` | Envío de emails con PIN via Gmail SMTP |
-| `RedisCacheService` | Almacenamiento de PINs temporales en Redis |
-| `JwtTokenService` | Generación de tokens JWT con HMAC-SHA256 |
-| `OrderCleanupService` | Background service que cancela órdenes pendientes mayores a 30 min |
-
-## Diagrama de la base de datos
-
+```http
+Authorization: Bearer <jwt>
 ```
-CUSTOMERS          ORDERS                ORDER_ITEMS
-┌──────────┐      ┌──────────────┐      ┌───────────────┐
-│ Id (PK)  │◄─────│ Id (PK)      │◄─────│ Id (PK)       │
-│ Email    │      │ CustomerId   │      │ OrderId (FK)  │
-│ CreatedAt│      │ TotalAmount  │      │ ProductName   │
-└──────────┘      │ Status       │      │ UnitPrice     │
-                  │ DatePurchase │      │ Quantity      │
-                  │ MercadoPago  │      └───────────────┘
-                  │   PreferenceId│
-                  └──────────────┘
+
+Hay requests de ejemplo en `PaymentGateway.API/test.http`.
+
+## Servicios principales
+
+- `MercadoPagoService`: crea preferencias y consulta pagos.
+- `SmtpEmailService`: envía los PIN por SMTP.
+- `RedisCacheService`: almacena temporalmente los PIN.
+- `JwtTokenService`: genera tokens JWT.
+- `OrderCleanupService`: cancela órdenes pendientes antiguas.
+
+## Comandos útiles
+
+```bash
+dotnet build
+dotnet test
+docker compose ps
 ```
