@@ -63,11 +63,21 @@ public class OrderRepository : IOrderRepository
 
     public async Task CancelOrdersAsync(IEnumerable<Order> orders)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         foreach (var order in orders)
         {
+            await _context.Entry(order).ReloadAsync();
+            if (order.Status != "Pending" && order.Status != "PENDING_PAYMENT") continue;
+            await _context.Entry(order).Collection(o => o.Items).LoadAsync();
+            foreach (var item in order.Items.Where(i => i.ProductType == "PHYSICAL"))
+            {
+                var product = await _context.Products.FindAsync(item.IdProduct);
+                if (product is not null) product.Stock += item.Quantity;
+            }
             order.Status = "CANCELLED";
             _context.Orders.Update(order);
         }
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 }

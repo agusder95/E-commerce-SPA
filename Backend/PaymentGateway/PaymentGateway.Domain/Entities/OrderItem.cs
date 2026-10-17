@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PaymentGateway.Domain.Entities;
@@ -29,6 +29,13 @@ public class OrderItem
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal FinalPrice { get; set; }
+
+    public decimal? BeforeCouponUnitPrice { get; set; }
+
+    public decimal ProductDiscount { get; set; }
+    public string? ProductType { get; set; }
+    public string? DigitalFileKey { get; set; }
+    public string? DigitalFiles { get; set; }
 
     // Propiedades de navegación
     public Order? Order { get; set; }

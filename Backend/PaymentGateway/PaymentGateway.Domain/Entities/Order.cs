@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace PaymentGateway.Domain.Entities;
@@ -31,6 +31,15 @@ public class Order
 
     [MaxLength(255)]
     public string? MercadoPagoPreferenceId { get; set; }
+
+    public DateTime? ApprovedAt { get; set; }
+
+    public bool ManuallyCancelled { get; set; }
+
+    public string? PreviousStatus { get; set; }
+    public string? ShippingAddress { get; set; }
+    public bool ConfirmationEmailPending { get; set; }
+    public DateTime? ConfirmationEmailSentAt { get; set; }
 
     // Propiedades de navegación
     public Customer? Customer { get; set; }

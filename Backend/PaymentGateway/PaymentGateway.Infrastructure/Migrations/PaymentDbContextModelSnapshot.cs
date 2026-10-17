@@ -22,6 +22,64 @@ namespace PaymentGateway.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.Coupon", b =>
+                {
+                    b.Property<int>("IdCoupon")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("Id_coupon");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("IdCoupon"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Cumulative")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<decimal>("Discount")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<DateTime?>("ExpirationDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("ProductType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Tags")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Used")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.HasKey("IdCoupon")
+                        .HasName("PK_COUPONS");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_COUPONS_Code");
+
+                    b.ToTable("COUPONS", (string)null);
+                });
+
             modelBuilder.Entity("PaymentGateway.Domain.Entities.Customer", b =>
                 {
                     b.Property<int>("IdCustomer")
@@ -45,10 +103,10 @@ namespace PaymentGateway.Infrastructure.Migrations
                     b.Property<string>("Role")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
+                        .HasMaxLength(50)
                         .IsUnicode(false)
-                        .HasColumnType("character varying(20)")
-                        .HasDefaultValue("Customer");
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("CUSTOMER");
 
                     b.HasKey("IdCustomer")
                         .HasName("PK__CUSTOMER__027A27688B2B4CD7");
@@ -57,6 +115,92 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("CUSTOMERS", (string)null);
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.DailyProductSale", b =>
+                {
+                    b.Property<int>("IdDailyProductSale")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("Id_daily_product_sale");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("IdDailyProductSale"));
+
+                    b.Property<decimal>("DiscountAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("GrossAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("IdProduct")
+                        .HasColumnType("integer")
+                        .HasColumnName("Id_Product");
+
+                    b.Property<decimal>("NetAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("ProductName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("SaleDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("IdDailyProductSale")
+                        .HasName("PK__DAILY_PR__4A3B2C1D5E6F7A8B");
+
+                    b.HasIndex("IdProduct")
+                        .HasDatabaseName("IX_DAILY_PRODUCT_SALES_Id_Product");
+
+                    b.HasIndex("SaleDate", "IdProduct")
+                        .IsUnique()
+                        .HasDatabaseName("UQ__DAILY_PR__SALE_PRODUCT");
+
+                    b.ToTable("DAILY_PRODUCT_SALES", (string)null);
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.DailySale", b =>
+                {
+                    b.Property<int>("IdDailySale")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("Id_daily_sale");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("IdDailySale"));
+
+                    b.Property<decimal>("DiscountAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("GrossAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("NetAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("OrderCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("SaleDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("IdDailySale")
+                        .HasName("PK__DAILY_SA__F0D5A0E9D9C3B2A1");
+
+                    b.HasIndex("SaleDate")
+                        .IsUnique()
+                        .HasDatabaseName("UQ__DAILY_SA__SALE_DATE");
+
+                    b.ToTable("DAILY_SALES", (string)null);
                 });
 
             modelBuilder.Entity("PaymentGateway.Domain.Entities.Order", b =>
@@ -68,6 +212,15 @@ namespace PaymentGateway.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("IdOrder"));
 
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("ConfirmationEmailPending")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("ConfirmationEmailSentAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("CouponCodeUsed")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -78,16 +231,31 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                     b.Property<decimal>("GlobalDiscount")
-                        .HasColumnType("decimal(18, 2)");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18, 2)")
+                        .HasDefaultValue(0m);
 
                     b.Property<int>("IdCustomer")
                         .HasColumnType("integer")
                         .HasColumnName("Id_customer");
 
+                    b.Property<bool>("ManuallyCancelled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("MercadoPagoPreferenceId")
                         .HasMaxLength(255)
                         .IsUnicode(false)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ShippingAddress")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -98,7 +266,9 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasDefaultValue("Pending");
 
                     b.Property<decimal>("SubTotal")
-                        .HasColumnType("decimal(18, 2)");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18, 2)")
+                        .HasDefaultValue(0m);
 
                     b.Property<decimal>("TotalAmount")
                         .HasColumnType("decimal(18, 2)");
@@ -107,6 +277,8 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasName("PK__ORDERS__33F95B5C7FCD8AD5");
 
                     b.HasIndex("IdCustomer");
+
+                    b.HasIndex("Status", "ApprovedAt");
 
                     b.ToTable("ORDERS", (string)null);
                 });
@@ -120,11 +292,26 @@ namespace PaymentGateway.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("IdOrderItem"));
 
+                    b.Property<decimal?>("BeforeCouponUnitPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("DigitalFileKey")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("DigitalFiles")
+                        .HasColumnType("text");
+
                     b.Property<decimal>("DiscountApplied")
-                        .HasColumnType("decimal(18, 2)");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18, 2)")
+                        .HasDefaultValue(0m);
 
                     b.Property<decimal>("FinalPrice")
-                        .HasColumnType("decimal(18, 2)");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18, 2)")
+                        .HasDefaultValue(0m);
 
                     b.Property<int>("IdOrder")
                         .HasColumnType("integer")
@@ -137,13 +324,25 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasColumnName("Id_Product");
 
                     b.Property<decimal>("OriginalUnitPrice")
-                        .HasColumnType("decimal(18, 2)");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18, 2)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<decimal>("ProductDiscount")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasDefaultValue(0m);
 
                     b.Property<string>("ProductName")
                         .IsRequired()
                         .HasMaxLength(255)
                         .IsUnicode(false)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<string>("ProductType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<int>("Quantity")
                         .HasColumnType("integer");
@@ -173,6 +372,14 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                     b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DigitalFileKey")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("DigitalFiles")
                         .HasColumnType("text");
 
                     b.Property<DateTime?>("DiscountEndDate")
@@ -195,7 +402,9 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasColumnType("character varying(150)");
 
                     b.Property<int>("Stock")
-                        .HasColumnType("integer");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<string>("Tags")
                         .HasColumnType("text");
@@ -215,6 +424,89 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasName("PK__PRODUCTS__5BD4DEE4F7C1E5A0");
 
                     b.ToTable("PRODUCTS", (string)null);
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.ProductPriceHistory", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("DiscountEndDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("DiscountPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("IdProduct")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IdProduct", "RecordedAt", "Id");
+
+                    b.ToTable("PRODUCT_PRICE_HISTORY", (string)null);
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.Tag", b =>
+                {
+                    b.Property<int>("IdTag")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("Id_Tag");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("IdTag"));
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("text")
+                        .HasComputedColumnSql("upper(regexp_replace(normalize(regexp_replace(btrim(\"Name\"), '\\s+', ' ', 'g'), NFD), '[\\u0300-\\u036f]', '', 'g'))", true);
+
+                    b.HasKey("IdTag")
+                        .HasName("PK__TAGS__7D2F0A1B3C4D5E6F");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("UQ__TAGS__NAME");
+
+                    b.HasIndex("NormalizedName")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_TAGS_NormalizedName");
+
+                    b.ToTable("TAGS", (string)null);
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.DailyProductSale", b =>
+                {
+                    b.HasOne("PaymentGateway.Domain.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("IdProduct")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired()
+                        .HasConstraintName("FK_DailyProductSales_Products");
+
+                    b.Navigation("Product");
                 });
 
             modelBuilder.Entity("PaymentGateway.Domain.Entities.Order", b =>
@@ -244,6 +536,17 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasConstraintName("FK_OrderItems_Products");
 
                     b.Navigation("Order");
+
+                    b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.ProductPriceHistory", b =>
+                {
+                    b.HasOne("PaymentGateway.Domain.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("IdProduct")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Product");
                 });
