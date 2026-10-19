@@ -11,13 +11,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHttpClient<PaymentGateway.Application.Interfaces.IAssetStorage,
+    PaymentGateway.Infrastructure.Services.AssetStorage>();
 
-//Contenedor de Dependencias SQL
+//Contenedor de Dependencias PostgreSQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 builder.Services.AddDbContext<PaymentDbContext>(options =>
 {
-    options.UseSqlServer(connectionString);
+    options.UseNpgsql(connectionString);
 });
 
 //Contenedor de Dependencias Redis
@@ -74,20 +76,25 @@ builder.Services.AddScoped<
 >();
 
 builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.OrderCleanupService>();
+builder.Services.AddScoped<PaymentGateway.Application.Interfaces.IPaymentReconciliationService,
+    PaymentGateway.Infrastructure.Services.PaymentReconciliationService>();
+builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.PaymentReconciliationWorker>();
+builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.PurchaseEmailService>();
 
 // CONFIGURACION M.P.
-var mercadoPagoToken = builder.Configuration["MercadoPago:AccesToken"];
+var mercadoPagoToken = builder.Configuration["MercadoPago:AccessToken"]
+    ?? builder.Configuration["MercadoPago:AccesToken"]; // Compatibilidad con la clave anterior.
 
-if (string.IsNullOrEmpty(mercadoPagoToken))
+if (string.IsNullOrWhiteSpace(mercadoPagoToken))
 {
     throw new ArgumentNullException(
         "MercadoPago:AccessToken",
-        "El token de Mercado Pago no está configurado."
+        "Configurá MercadoPago:AccessToken o la variable MercadoPago__AccessToken antes de iniciar la API."
     );
 }
 
 // Inyecta el token globalmente para q SDK lo use en c/peticion
-MercadoPagoConfig.AccessToken = mercadoPagoToken;
+MercadoPagoConfig.AccessToken = mercadoPagoToken.Trim();
 
 // Configuración esquema autenticacion
 builder
@@ -123,7 +130,8 @@ builder.Services.AddCors(options =>
                 .WithOrigins(
                     "http://localhost:3000",
                     "http://localhost:5173",
-                    " http://localhost:5173"
+                    "http://127.0.0.1:5173",
+                    builder.Configuration["Store:FrontendUrl"] ?? "http://localhost:5173"
                 )
                 .AllowAnyHeader()
                 .AllowAnyMethod();

@@ -1,54 +1,92 @@
+using System;
 using System.Net;
 using System.Net.Mail;
+using System.Net.Mime;
+using System.Text;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using PaymentGateway.Application.Interfaces;
+using PaymentGateway.Domain.Entities;
 
 namespace PaymentGateway.Infrastructure.Services;
 
 public class SmtpEmailService : IEmailService
 {
     private readonly IConfiguration _config;
+    private readonly ILogger<SmtpEmailService> _logger;
 
-    public SmtpEmailService(IConfiguration config)
+    public SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> logger)
     {
         _config = config;
+        _logger = logger;
     }
 
-    public async Task SendPinEmailAsync(string toEmail, string pin)
+    public Task SendPinEmailAsync(string toEmail, string pin)
     {
-        var smtpServer = _config["EmailSettings:SmtpServer"];
-        var port = int.Parse(_config["EmailSettings:Port"]!);
-        var senderEmail = _config["EmailSettings:SenderEmail"];
-        var senderPassword = _config["EmailSettings:SenderPassword"];
+        var content = AccessCodeEmail.Create(pin);
+        return SendAsync(toEmail, content.Subject, content.Text, content.Html);
+    }
+
+    public Task SendPurchaseConfirmationAsync(string toEmail, Order order)
+    {
+        var content = PurchaseEmail.Create(order, _config["Store:FrontendUrl"], _config["Store:InstagramUrl"]);
+        return SendAsync(toEmail, content.Subject, content.Text, content.Html);
+    }
+
+    private async Task SendAsync(string toEmail, string subject, string textBody, string htmlBody)
+    {
+        var smtpServer = _config["EmailSettings:SmtpServer"]
+            ?? throw new InvalidOperationException("Falta configurar EmailSettings:SmtpServer.");
+        var senderEmail = _config["EmailSettings:SenderEmail"]
+            ?? throw new InvalidOperationException("Falta configurar EmailSettings:SenderEmail.");
+        var senderPassword = _config["EmailSettings:SenderPassword"]
+            ?? throw new InvalidOperationException("Falta configurar EmailSettings:SenderPassword.");
+
+        if (!int.TryParse(_config["EmailSettings:Port"], out var port) || port <= 0 || port > 65535)
+        {
+            throw new InvalidOperationException("EmailSettings:Port debe ser un puerto válido.");
+        }
+
+        // Gmail presenta las contraseñas de aplicación en grupos separados por espacios.
+        senderPassword = senderPassword.Replace(" ", string.Empty);
 
         using var client = new SmtpClient(smtpServer, port)
         {
+            UseDefaultCredentials = false,
             Credentials = new NetworkCredential(senderEmail, senderPassword),
-            EnableSsl = true,
+            EnableSsl = true
         };
 
-        var mailMessage = new MailMessage
+        using var mailMessage = new MailMessage
         {
-            From = new MailAddress(senderEmail!, "Manuales y Cursos"),
-            Subject = "Tu código de acceso seguro",
-            Body =
-                $@"
-                <div style='font-family: Arial, sans-serif; padding: 20px; color: #333;'>
-                    <h2 style='color: #2E8B57;'>¡Hola!</h2>
-                    <p>Solicitaste acceso al portal para descargar tu manual.</p>
-                    <p>Tu código de seguridad es:</p>
-                    <div style='background-color: #f4f4f4; padding: 15px; border-radius: 8px; display: inline-block;'>
-                        <h1 style='margin: 0; color: #333; letter-spacing: 5px;'>{pin}</h1>
-                    </div>
-                    <p style='margin-top: 20px; font-size: 14px; color: #666;'>
-                        <em>Este código expira en 5 minutos. No lo compartas con nadie.</em>
-                    </p>
-                </div>",
-            IsBodyHtml = true,
+            From = new MailAddress(senderEmail, "Manuales y Cursos", Encoding.UTF8),
+            Subject = subject,
+            SubjectEncoding = Encoding.UTF8,
+            BodyEncoding = Encoding.UTF8
         };
 
         mailMessage.To.Add(toEmail);
+        mailMessage.ReplyToList.Add(new MailAddress(senderEmail));
 
-        await client.SendMailAsync(mailMessage);
+        mailMessage.AlternateViews.Add(
+            AlternateView.CreateAlternateViewFromString(textBody, Encoding.UTF8, MediaTypeNames.Text.Plain)
+        );
+        mailMessage.AlternateViews.Add(
+            AlternateView.CreateAlternateViewFromString(htmlBody, Encoding.UTF8, MediaTypeNames.Text.Html)
+        );
+
+        try
+        {
+            await client.SendMailAsync(mailMessage);
+            _logger.LogInformation("Correo enviado por SMTP a {Email}.", toEmail);
+        }
+        catch (SmtpException ex)
+        {
+            _logger.LogError(ex,
+                "No se pudo enviar el correo por SMTP a {Email}. Servidor: {Server}:{Port}.",
+                toEmail, smtpServer, port);
+            throw;
+        }
     }
 }

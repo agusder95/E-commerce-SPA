@@ -7,9 +7,18 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
+    "test": "node --test tests/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@lexical/extension": "^0.52.0",
+    "@lexical/history": "^0.52.0",
+    "@lexical/list": "^0.52.0",
+    "@lexical/react": "^0.52.0",
+    "@lexical/rich-text": "^0.52.0",
+    "@tabler/icons-react": "^3.49.0",
+    "jspdf": "4.2.1",
+    "lexical": "^0.52.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2"

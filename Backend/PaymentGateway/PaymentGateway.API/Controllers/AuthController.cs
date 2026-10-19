@@ -31,11 +31,19 @@ public class AuthController : ControllerBase
     [HttpPost("request-access")]
     public async Task<IActionResult> RequestAccess([FromBody] GeneratePinRequest request)
     {
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        if (request.PreviousEmail is not null &&
+            string.Equals(email, request.PreviousEmail.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { Message = "Ingresa un email diferente al anterior." });
+        }
+
         var pin = new Random().Next(100000, 999999).ToString();
-        var cacheKey = $"PIN_{request.Email}";
+        var cacheKey = $"PIN_{email}";
 
         await _cacheService.SetCacheValueAsync(cacheKey, pin, TimeSpan.FromMinutes(5));
-        await _emailService.SendPinEmailAsync(request.Email, pin);
+        await _emailService.SendPinEmailAsync(email, pin);
 
         return Ok(
             new
@@ -49,7 +57,8 @@ public class AuthController : ControllerBase
     [HttpPost("verify-access")]
     public async Task<IActionResult> VerifyAccess([FromBody] ValidatePinRequest request)
     {
-        var cacheKey = $"PIN_{request.Email}";
+        var email = request.Email.Trim().ToLowerInvariant();
+        var cacheKey = $"PIN_{email}";
         var cachedPin = await _cacheService.GetCacheValueAsync(cacheKey);
 
         // Agrupado por seguridad
@@ -59,11 +68,11 @@ public class AuthController : ControllerBase
         }
 
         // Obtener el ID del cliente
-        var customer = await _customerRepository.GetCustomerByEmailAsync(request.Email);
+        var customer = await _customerRepository.GetCustomerByEmailAsync(email);
 
         if (customer == null)
         {
-            var newCustomer = new Customer { Email = request.Email };
+            var newCustomer = new Customer { Email = email };
 
             customer = await _customerRepository.CreateCustomerAsync(newCustomer);
         }
@@ -72,7 +81,7 @@ public class AuthController : ControllerBase
         await _cacheService.RemoveCacheValueAsync(cacheKey);
 
         // Generacion de JWT
-        var token = _tokenService.GenerateToken(request.Email, customer.IdCustomer, customer.Role);
+        var token = _tokenService.GenerateToken(email, customer.IdCustomer, customer.Role);
 
         return Ok(
             new

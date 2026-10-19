@@ -24,7 +24,7 @@ public class Product
     [MaxLength(255)]
     public string? Thumbnail { get; set; }
 
-    public string? Description { get; set; }
+    public string Description { get; set; } = string.Empty;
 
     // Guardamos JSON. Conversion List en los DTOs.
     public string? Tags { get; set; }
@@ -38,6 +38,9 @@ public class Product
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public bool IsDeleted { get; set; }
+
+    public string? DigitalFileKey { get; set; }
+    public string? DigitalFiles { get; set; }
 
     public ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();
 }
