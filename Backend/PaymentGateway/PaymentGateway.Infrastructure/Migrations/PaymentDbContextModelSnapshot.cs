@@ -230,6 +230,9 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<decimal>("GlobalDiscount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("decimal(18, 2)")
@@ -238,6 +241,9 @@ namespace PaymentGateway.Infrastructure.Migrations
                     b.Property<int>("IdCustomer")
                         .HasColumnType("integer")
                         .HasColumnName("Id_customer");
+
+                    b.Property<DateTime?>("LastPaymentCheckAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("ManuallyCancelled")
                         .ValueGeneratedOnAdd()
@@ -248,6 +254,17 @@ namespace PaymentGateway.Infrastructure.Migrations
                         .HasMaxLength(255)
                         .IsUnicode(false)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime?>("NextPaymentCheckAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PaymentCheckAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<long?>("PaymentId")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("PreviousStatus")
                         .HasMaxLength(50)
@@ -276,7 +293,13 @@ namespace PaymentGateway.Infrastructure.Migrations
                     b.HasKey("IdOrder")
                         .HasName("PK__ORDERS__33F95B5C7FCD8AD5");
 
+                    b.HasIndex("ExpiresAt")
+                        .HasFilter("\"Status\" IN ('Pending', 'PENDING_PAYMENT')");
+
                     b.HasIndex("IdCustomer");
+
+                    b.HasIndex("NextPaymentCheckAt")
+                        .HasFilter("\"NextPaymentCheckAt\" IS NOT NULL");
 
                     b.HasIndex("Status", "ApprovedAt");
 

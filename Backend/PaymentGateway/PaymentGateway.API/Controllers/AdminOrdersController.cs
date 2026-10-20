@@ -3,12 +3,15 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PaymentGateway.Infrastructure.Persistence;
+using PaymentGateway.Infrastructure.Services;
+using Microsoft.Extensions.Options;
 
 namespace PaymentGateway.API.Controllers;
 
 [ApiController, Route("api/admin/orders"), Authorize(Roles = "ADMIN,Admin,admin")]
-public class AdminOrdersController(PaymentDbContext db) : ControllerBase
+public class AdminOrdersController(PaymentDbContext db, IOptions<PaymentTrackingOptions>? tracking = null) : ControllerBase
 {
+    private readonly PaymentTrackingOptions _tracking = tracking?.Value ?? new PaymentTrackingOptions();
     [HttpPost("{id:int}/cancel")]
     public Task<IActionResult> Cancel(int id) => ChangeStatus(id, restore: false);
 
@@ -29,6 +32,8 @@ public class AdminOrdersController(PaymentDbContext db) : ControllerBase
 
     private async Task<IActionResult> UpdateOrder(int id, bool restore)
     {
+        await using var orderLock = await PaymentOrderLock.TryAcquireAsync(db, id);
+        if (orderLock is null) return Conflict(new { Message = "El pago de esta orden se está verificando. Volvé a intentar en unos segundos." });
         await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var orders = await db.Orders.FromSqlInterpolated($"""
             SELECT * FROM "ORDERS" WHERE "Id_order" = {id} FOR UPDATE
@@ -60,6 +65,11 @@ public class AdminOrdersController(PaymentDbContext db) : ControllerBase
         order.Status = next;
         order.ManuallyCancelled = !restore;
         if (restore) order.PreviousStatus = null;
+        var now = DateTime.UtcNow;
+        order.NextPaymentCheckAt = PaymentTrackingOptions.IsUnresolved(order) &&
+            (PaymentTrackingOptions.IsAwaitingPayment(order) || _tracking.TrackingDeadline(order) > now) &&
+            !(order.ManuallyCancelled && order.PreviousStatus is "APPROVED" or "PAID_REQUIRES_REVIEW")
+            ? now : null;
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
         return Ok(new { Message = restore ? "Orden restaurada correctamente." : "Orden cancelada correctamente." });

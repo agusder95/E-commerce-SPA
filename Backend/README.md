@@ -109,13 +109,29 @@ Firma inválida: **401**; ID/cuerpo inconsistente: **400**; importe/moneda incor
 
 Revisar el historial de ngrok en `http://localhost:4040`: **401** indica una firma rechazada (la consola informa el motivo, sin exponer claves). Copiar `WebhookSecret` desde la misma aplicación de Mercado Pago que corresponde al AccessToken, guardar y reiniciar la API. Si el proveedor informa `live_mode: true`, verificar la configuración de esa aplicación/modo, no asumir que usa la clave de prueba. **404** en `/` significa que la URL del panel quedó incompleta: debe terminar en `/api/checkout/webhook`. El retorno del navegador y los eventos IPN antiguos `?topic=payment&id=...` no sustituyen un webhook firmado.
 
-El backend registra `PaymentReconciliationWorker`: al arrancar y cada 15 segundos recorre las órdenes con preferencia aún sin resolver, consulta sus pagos en Mercado Pago y aplica la confirmación. **No depende del navegador**: sigue funcionando al ir a `/home`, cerrar la pestaña o cerrar sesión. Retoma las órdenes persistidas después de reiniciar la API; mientras la API está apagada no puede consultar. Un ciclo no se solapa con el anterior, y un error en una orden no bloquea las siguientes. También revisa rechazadas/canceladas para detectar pagos tardíos: recupera stock si está disponible o deja la compra en revisión. Las órdenes ya pagadas no vuelven a descontar stock ni a generar el correo de confirmación.
+Los webhooks son la vía principal de confirmación. `PaymentReconciliationWorker` funciona como respaldo y selecciona como máximo 50 órdenes cuya `NextPaymentCheckAt` ya llegó. **No depende del navegador ni de una sesión abierta.** La próxima consulta, el último intento, su contador y el ID de pago verificado quedan persistidos. Los intervalos crecen de 30 a 60, 120, 240 y 300 segundos; los errores aumentan la espera, con el mismo máximo. Las órdenes aprobadas o en revisión salen de la cola. Los pagos en proceso reutilizan su ID, evitando buscar nuevamente la preferencia.
 
-La pantalla de resultado también ejecuta `POST /api/checkout/orders/{orderId}/sync-payment` con JWT inmediatamente y cada 15 segundos mientras espera, sólo como consulta adicional. No necesita cuerpo: el backend busca el pago por la preferencia guardada y la referencia de la orden; no acepta IDs ni estados de pago del navegador. Sólo el dueño de la orden puede solicitarlo; la respuesta oficial debe coincidir con la orden, el importe y ARS antes de usar `PaymentReconciliationService`, compartido con el webhook y el worker. La recuperación devuelve **204** si se completó la consulta (incluso si todavía no hubo pago), **404** si la orden no pertenece al usuario y **409** si el pago no corresponde. No desactiva ni relaja la verificación de firma de notificaciones públicas.
+La reserva de una orden nueva y su preferencia vencen a los **20 minutos**, usando el mismo `ExpiresAt`. La limpieza espera el próximo vencimiento y comparte la conciliación: antes de liberar una reserva sin pago hace una última consulta al proveedor. Una respuesta de pago en proceso conserva la reserva; una caída del proveedor posterga la liberación hasta poder verificar. Por eso los 20 minutos no garantizan liberación exacta durante una caída o con pagos en proceso. Las reservas sin preferencia pueden liberarse directamente. Una reserva sin pago se sigue revisando si el proveedor continúa caído, para poder resolverla al recuperarse.
 
-El barrido actual prioriza no dejar órdenes antiguas sin verificar y no agrega una caducidad artificial. Si aumenta mucho el volumen de órdenes no resueltas, reemplazar el barrido por una cola persistida con backoff para respetar los límites del proveedor. El webhook sigue siendo el canal principal de confirmación inmediata.
+**Sin trabajo no hay consultas periódicas a la base.** Pagos, reservas y correos hacen una lectura inicial y duermen hasta la próxima fecha pendiente o una notificación de PostgreSQL. `PostgresOrderWorkListener` mantiene una conexión dedicada con `LISTEN`, sin ejecutar consultas SQL de sondeo ni keepalive SQL. La migración `OrderWorkNotifications` crea un trigger que notifica cambios de estado, planificación, preferencia, vencimiento o correo pendiente después del commit. Un rollback y las modificaciones ajenas a esas colas no las despiertan. Cada instancia recibe el evento; los bloqueos existentes coordinan el procesamiento. Al reconectar se vuelven a leer las colas para recuperar eventos perdidos. El número de revisión de la señal evita perder un commit entre leer la cola y comenzar a esperar.
+
+`WorkerIntervalSeconds` y `CleanupIntervalSeconds` quedan como esperas mínimas de reintento de trabajos vencidos/bloqueados, no como temporizadores permanentes. Las fallas de base usan espera creciente hasta cinco minutos. Los correos fallidos mantienen su reintento de 15 segundos mientras haya correos pendientes. Aplicá `OrderWorkNotifications` antes de reiniciar la API; el listener valida el trigger al arrancar para evitar quedar dormido sin recibir eventos. Las comprobaciones de PostgreSQL cuentan las sentencias de las tres tareas durante 16 segundos sin trabajo y verifican cero consultas, despertar entre conexiones y recuperación después de reconectar.
+
+Rechazadas, canceladas y pagos en proceso tienen una ventana de consultas automáticas de 24 horas después del vencimiento. Terminado ese plazo salen de la cola; los pagos que siguen en proceso conservan su estado y stock y deben revisarse operativamente si no llega una notificación. Los webhooks autenticados siguen funcionando después de ese plazo: un pago tardío recupera stock disponible o deja la compra en revisión. La cancelación local no cancela un cobro que ya esté procesando Mercado Pago.
+
+El webhook, la conciliación, la limpieza y las acciones administrativas coordinan cada orden mediante un bloqueo de sesión de PostgreSQL. Esto evita búsquedas simultáneas desde distintas instancias y mantiene las transacciones fuera de las esperas de red. Si una notificación llega mientras la orden está bloqueada, recibe 503 para que se reintente. La planificación se guarda antes de consultar al proveedor para respetar la espera también después de reiniciar la API. Las aprobaciones repetidas no descuentan stock ni envían correos dos veces.
+
+Los valores están en la sección `PaymentTracking` de `appsettings.json` y pueden sobreescribirse con variables como `PaymentTracking__ReservationMinutes`. Se validan al iniciar. El meter `PaymentGateway.Payments` expone `payment.provider.requests`, `payment.provider.failures` y `payment.provider.duration` (milisegundos), con la operación `search`, `verify` o `create_preference`. Los registros de conciliación incluyen orden, resultado, intento y próxima consulta; el worker registra las órdenes que terminan su ventana de seguimiento.
+
+Aplicá `PaymentTrackingSchedule` antes de iniciar esta versión. La migración conserva los 30 minutos de las preferencias emitidas anteriormente y programa la recuperación de órdenes pendientes existentes. Las canceladas/rechazadas históricas fuera de la ventana no reinician consultas. Las pruebas `PaymentGateway.SecurityChecks -- --database` verifican esta actualización, los intervalos, el límite por lote, la coordinación entre conexiones, los pagos tardíos y la liberación única de stock.
+
+El frontend comparte el seguimiento del carrito y la pantalla de resultado y consulta únicamente `GET /api/order/{id}` con intervalos crecientes (3 a 30 segundos), pausando al ocultar la pestaña o perder conexión. Este endpoint filtra por usuario en PostgreSQL, devuelve un resumen sin ítems e incluye `expiresAt` para evitar reabrir preferencias vencidas. No llama al proveedor. El cierre de sesión detiene las solicitudes del navegador y deja funcionando el proceso del servidor.
+
+`POST /api/checkout/orders/{orderId}/sync-payment` permanece disponible como recuperación autenticada y respeta la misma planificación persistida: una petición adelantada devuelve **204** sin consultar Mercado Pago. No acepta IDs ni estados de pago del navegador. Sólo el dueño puede solicitarlo; devuelve **204** al completar o diferir, **404** si no le pertenece y **409** si el pago no coincide con referencia, importe y moneda. El frontend ya no lo ejecuta periódicamente. La autenticación de este endpoint no reemplaza la firma de los webhooks públicos.
 
 Comprobaciones de seguridad sin pagos reales:
+
+El [informe de seguridad y pagos](SECURITY-PAYMENTS-TEST-REPORT.md) detalla la cobertura, los hallazgos y los límites de la validación. La variante con `--database` también inicia un servidor HTTP local temporal para probar JWT, roles, aislamiento de clientes, firmas de webhook y descargas con el middleware real.
 
 ```bash
 dotnet run --project PaymentGateway.SecurityChecks
@@ -140,6 +156,7 @@ La segunda opción lee la conexión local de `PaymentGateway.API/appsettings.Dev
 | `GET` | `/api/admin/statistics/products/{id}/sales?from=2026-10-01&to=2026-10-31&groupBy=day` | Admin | Unidades e importe vendido por producto y período |
 | `GET` | `/api/admin/statistics/products/{id}/prices?from=2026-10-01&to=2026-10-31` | Admin | Intervalos de precios de lista y ofertas |
 | `GET` | `/api/admin/orders` | Admin | Lista órdenes con detalle de productos, descuentos y cupón |
+| `PATCH` | `/api/admin/products/stock` | Admin | Actualiza solo stock físico en un lote atómico de hasta 500 entradas `{ idProduct, expectedStock, stock }` dentro de `{ items: [...] }`; devuelve 409 si un stock cambió o el producto no está disponible |
 | `POST` | `/api/admin/tags/delete` | Admin | Elimina los tags seleccionados y los quita de productos actuales y borrados; protege Físico y Digital |
 | `POST` | `/api/admin/orders/{id}/cancel` | Admin | Cancela una orden y libera el stock reservado; no realiza reembolsos |
 | `POST` | `/api/admin/orders/{id}/restore` | Admin | Recupera el estado anterior y valida el stock antes de reservarlo |
@@ -175,12 +192,44 @@ Aplicar la migración con `dotnet ef database update --project PaymentGateway.In
 
 Devuelve importe vendido, compras aprobadas, unidades vendidas, promedio por compra y cantidad actual de productos activos. `topProducts` contiene hasta tres productos con más unidades vendidas, incluidos productos eliminados que tengan ventas. `leastSoldProducts` contiene hasta tres productos actualmente activos, creados antes del final del período, incluyendo los que no tuvieron ventas. Se ordenan por unidades vendidas divididas por días calendario desde el inicio del período o su creación, lo que sea posterior. Ante igualdad se priorizan menos unidades y mayor tiempo disponible. Los formatos físicos y digitales se cuentan por separado. No se reconstruye la disponibilidad histórica de productos eliminados/restaurados.
 
+## Login por PIN
+
+Los códigos contienen seis dígitos generados con `RandomNumberGenerator`. Vencen en **5 minutos** y sólo pueden usarse una vez: la verificación y eliminación se ejecutan en una operación atómica de Redis, antes de consultar/crear el cliente o emitir el JWT. Un reenvío reemplaza el código anterior. Redis guarda una prueba HMAC ligada al correo normalizado y a un identificador aleatorio de desafío; no guarda el PIN en texto plano. La clave HMAC se deriva con un contexto propio de `JwtSettings:SecretKey`, que debe tener al menos 32 bytes y ser idéntica entre instancias. Rotar esa clave invalida los PIN pendientes y los JWT existentes.
+
+Los valores de `PinLogin` en `PaymentGateway.API/appsettings.json` controlan:
+
+| Control | Valor inicial |
+|---|---|
+| Vigencia | 300 segundos |
+| Espera entre envíos al mismo correo | 60 segundos |
+| Intentos incorrectos por desafío | 5 |
+| Bloqueo del correo tras agotar intentos | 900 segundos |
+| Ventana de límites | 900 segundos desde la primera operación |
+| Envíos por correo / IP en la ventana | 5 / 20 |
+| Verificaciones por correo / IP en la ventana | 20 / 100 |
+
+Los límites se comparten entre instancias y sobreviven a reinicios de la API mientras Redis conserve sus datos. Cambiar mayúsculas o IP no elimina el límite del correo. También se cuentan verificaciones de códigos inexistentes. Durante un bloqueo no se puede enviar otro PIN para reiniciar los intentos. Un error de SMTP revoca sólo su propio desafío y libera la espera de reenvío, pero conserva los presupuestos de solicitudes. Si Redis falla se devuelve **503**; el login no permite continuar sin verificación.
+
+**429** devuelve `Retry-After`, `code: PIN_RATE_LIMITED` y `retryAfterSeconds`. **503** devuelve `code: PIN_UNAVAILABLE`, sin detalles internos. La solicitud exitosa informa `expiresInSeconds` y `resendAfterSeconds`. El frontend usa este último y muestra los mensajes del servidor. Las respuestas del login llevan `Cache-Control: no-store`.
+
+La IP se toma de la conexión. El código no confía directamente en `X-Forwarded-For`. Si hay un proxy delante, configurar explícitamente los proxies/redes confiables con el middleware de ASP.NET Core antes de usar direcciones reenviadas; de lo contrario, todos sus clientes compartirán el límite de la IP del proxy. Todas las instancias deben usar el mismo Redis, prefijo `PinLogin:RedisKeyPrefix` y políticas. Las claves usan TTL y un mismo hash slot para permitir scripts atómicos en Redis Cluster. Redis debe ser privado, autenticado y accesible sólo por servicios autorizados.
+
+No requiere migración de PostgreSQL. Al actualizar, los PIN emitidos por la implementación anterior dejan de aceptarse y debe solicitarse uno nuevo. Reiniciar la API y publicar el frontend actualizado para activar los cambios.
+
+Pruebas con Redis real, servidor HTTP temporal y PostgreSQL temporal, sin SMTP externo:
+
+```bash
+dotnet run --project Backend/PaymentGateway/PaymentGateway.SecurityChecks --no-restore -m:1 -- --database --redis
+```
+
+Se requiere `ConnectionStrings:RedisConnection` además de la conexión PostgreSQL de desarrollo. Las pruebas sólo eliminan claves de su prefijo aleatorio; no ejecutan `FLUSHDB`.
+
 ## Servicios principales
 
 - `MercadoPagoService`: crea preferencias y consulta pagos.
 - `SmtpEmailService`: envía los PIN y las confirmaciones de compra por SMTP.
-- `PurchaseEmailService`: procesa cada 15 segundos las confirmaciones pendientes de pagos verificados, registra el envío y reintenta los fallos de SMTP. Las órdenes anteriores a la migración no generan correos retroactivos.
-- `RedisCacheService`: almacena temporalmente los PIN.
+- `PurchaseEmailService`: despierta al recibir confirmaciones pendientes de pagos verificados, registra el envío y reintenta los fallos de SMTP cada 15 segundos mientras haya trabajo. Sin correos pendientes espera notificaciones de la base. Las órdenes anteriores a la migración no generan correos retroactivos.
+- `RedisPinChallengeStore`: guarda pruebas HMAC de los PIN y aplica consumo único, límites y bloqueos mediante scripts atómicos de Redis.
 - `JwtTokenService`: genera tokens JWT.
 - `OrderCleanupService`: cancela órdenes pendientes antiguas.
 
@@ -188,7 +237,7 @@ Devuelve importe vendido, compras aprobadas, unidades vendidas, promedio por com
 
 Las confirmaciones incluyen productos, cantidades, importes y un enlace a `/my-purchases` en `Store:FrontendUrl` (usá la URL pública de la tienda al publicar). Si hay productos físicos, indican entrega presencial y enlazan a la cuenta configurada en `Store:InstagramUrl`, actualmente `https://www.instagram.com/brandoni.andrea/`. Sin sesión, el enlace abre el login y regresa a Mis compras después de verificar el PIN.
 
-Aplicá la migración `PurchaseConfirmationEmails` antes de iniciar la API actualizada:
+Aplicá las migraciones pendientes, incluidas `PaymentTrackingSchedule` y `OrderWorkNotifications`, antes de iniciar la API actualizada:
 
 ```bash
 dotnet ef database update --project PaymentGateway.Infrastructure --startup-project PaymentGateway.API

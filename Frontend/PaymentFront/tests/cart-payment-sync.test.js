@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { identifyCartEntries, removePurchasedItems } from '../src/features/cart/model/purchasedItems.js';
-import { CHECKOUT_STORAGE_KEY, trackCheckout, readCheckouts, forgetCheckout } from '../src/features/cart/storage/checkouts.js';
+import { CHECKOUT_STORAGE_KEY, trackCheckout, readCheckouts, forgetCheckout,
+  stopCheckoutTracking, resumeCheckoutTracking } from '../src/features/cart/storage/checkouts.js';
 
 const entry = { id: 1, type: 'PHYSICAL', quantity: 3, cartEntryId: 'first-entry' };
 const checkout = { orderId: 42, customerId: '7', items: [{ id: 1, quantity: 1, cartEntryId: 'first-entry' }] };
@@ -50,4 +51,20 @@ test('invalid or unavailable storage and unowned checkout records are ignored', 
   }
   assert.equal(trackCheckout(42, undefined, [entry], local), false);
   assert.deepEqual(readCheckouts({ getItem() { throw new Error('disabled'); } }), []);
+});
+
+test('terminal orders stop tracking without losing the immutable snapshot needed for a late approval', () => {
+  const local = storage();
+  trackCheckout(42, 7, [entry], local);
+  trackCheckout(43, 8, [entry], local);
+  stopCheckoutTracking(42, 8, local);
+  assert.equal(readCheckouts(local)[0].trackingStopped, undefined);
+  stopCheckoutTracking(42, 7, local);
+  const stopped = readCheckouts(local)[0];
+  assert.equal(stopped.trackingStopped, true);
+  assert.equal(stopped.items[0].quantity, 3);
+  assert.deepEqual(removePurchasedItems([entry], stopped), []);
+  resumeCheckoutTracking(42, 7, local);
+  assert.equal(readCheckouts(local)[0].trackingStopped, false);
+  assert.equal(readCheckouts(local)[1].customerId, '8');
 });

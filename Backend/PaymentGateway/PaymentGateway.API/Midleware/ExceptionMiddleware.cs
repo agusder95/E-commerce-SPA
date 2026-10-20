@@ -23,11 +23,11 @@ public class ExceptionMiddleware
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ha ocurrido un error no controlado en la API.");
-            await HandleExceptionAsync(context, ex);
+            await HandleExceptionAsync(context);
         }
     }
 
-    private static Task HandleExceptionAsync(HttpContext context, Exception exception)
+    private static Task HandleExceptionAsync(HttpContext context)
     {
         // Forzamos JSON
         context.Response.ContentType = "application/json";
@@ -37,8 +37,6 @@ public class ExceptionMiddleware
         {
             StatusCode = context.Response.StatusCode,
             Message = "Ocurrió un error interno en el servidor. Por favor, intente más tarde.",
-            // Opcional: Para desarrollo es útil enviar el detalle del error
-            Detailed = exception.Message,
         };
 
         var json = JsonSerializer.Serialize(response);

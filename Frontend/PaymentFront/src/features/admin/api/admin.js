@@ -11,6 +11,9 @@ export async function getAdminProducts(includeDeleted = false, options) {
 export const changeProductStatus = (ids, deleted) => apiFetch('/api/admin/products/status', {
   method: 'POST', body: JSON.stringify({ ids, deleted }),
 });
+export const updateProductStock = items => apiFetch('/api/admin/products/stock', {
+  method: 'PATCH', body: JSON.stringify({ items }),
+});
 export const importImageUrl = url => apiFetch('/api/admin/assets/image-url', {
   method: 'POST', body: JSON.stringify({ url }),
 });

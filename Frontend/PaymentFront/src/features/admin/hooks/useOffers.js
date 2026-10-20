@@ -40,7 +40,7 @@ export default function useOffers() {
     const timeout = setTimeout(() => setNotice(''), 5000);
     return () => clearTimeout(timeout);
   }, [notice]);
-  const productsPagination = paginateOfferProducts(filterOfferProducts(products, productTags, productSort, offerStatus, undefined, productSearch), productPage);
+  const productsPagination = paginateOfferProducts(filterOfferProducts(products, productTags, productSort, offerStatus, undefined, productSearch, discount), productPage);
   const visibleProducts = productsPagination.items;
   const selectedProducts = products.filter(product => selected.includes(product.id));
   const visibleCoupons = filterCoupons(coupons, couponFilter, couponSort);

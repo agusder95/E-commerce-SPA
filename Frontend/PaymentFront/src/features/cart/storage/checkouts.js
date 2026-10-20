@@ -38,3 +38,14 @@ export function trackCheckout(orderId, customerId, cart, storage) {
 export function forgetCheckout(orderId, customerId, storage) {
   saveCheckouts(readCheckouts(storage).filter(entry => entry.orderId !== Number(orderId) || entry.customerId !== String(customerId)), storage);
 }
+
+function setCheckoutTracking(orderId, customerId, trackingStopped, storage) {
+  const entries = readCheckouts(storage);
+  const record = entries.find(entry => entry.orderId === Number(orderId) && entry.customerId === String(customerId));
+  if (!record || Boolean(record.trackingStopped) === trackingStopped) return;
+  // Keep the immutable purchased quantities: a late approval can still settle the cart.
+  saveCheckouts(entries.map(entry => entry === record ? { ...entry, trackingStopped } : entry), storage);
+}
+
+export const stopCheckoutTracking = (orderId, customerId, storage) => setCheckoutTracking(orderId, customerId, true, storage);
+export const resumeCheckoutTracking = (orderId, customerId, storage) => setCheckoutTracking(orderId, customerId, false, storage);

@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { purchaseReceipt } from '../model/receipt.js';
 import { money } from '../../../shared/utils/format.js';
+import { BRAND_NAME } from '../../../shared/brand.js';
 
 export function createReceiptPdf(purchase) {
   const receipt = purchaseReceipt(purchase);
@@ -12,7 +13,7 @@ export function createReceiptPdf(purchase) {
 
 function renderReceipt(receipt, height) {
   const doc = new jsPDF({ unit: 'mm', format: [80, height], orientation: 'portrait' });
-  doc.setProperties({ title: `Ticket de compra ${receipt.orderId}`, subject: 'Comprobante de compra', creator: 'forma.' });
+  doc.setProperties({ title: `Ticket de compra ${receipt.orderId}`, subject: 'Comprobante de compra', creator: BRAND_NAME });
   const margin = 7;
   const width = 66;
   let y = 12;
@@ -39,10 +40,12 @@ function renderReceipt(receipt, height) {
     doc.setDrawColor(120); doc.setLineDashPattern([1, 1], 0);
     doc.line(margin, y, margin + width, y); doc.setLineDashPattern([], 0); y += 5;
   }
-  text('forma.', { bold: true, size: 18, center: true });
+  text(BRAND_NAME, { bold: true, size: 12, center: true });
   text('COMPROBANTE DE COMPRA', { bold: true, center: true });
   text(`Compra #${receipt.orderId}`, { center: true });
-  text(receipt.date, { center: true }); text(receipt.status, { center: true }); rule();
+  text(receipt.date, { center: true });
+  text(`Hora: ${receipt.time} (Argentina)`, { center: true });
+  text(receipt.status, { center: true }); rule();
   for (const item of receipt.items) {
     ensureSpace(22);
     text(item.name, { bold: true }); text(item.type);

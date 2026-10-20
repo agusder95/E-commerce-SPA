@@ -71,6 +71,7 @@ var config = Configuration(secret);
 var options = new DbContextOptionsBuilder<PaymentDbContext>()
     .UseNpgsql("Host=127.0.0.1;Port=1;Database=unused;Username=unused;Timeout=1").Options;
 await using var offlineDb = new PaymentDbContext(options);
+await ProductStockChecks.ValidateAsync(offlineDb, Check);
 var payment = new FakePayment();
 var controller = Controller(offlineDb, payment, config);
 var payload = Payload();
@@ -165,6 +166,22 @@ try
     var beforeRequests = sdkHttp.Urls.Count;
     Check(await service.FindPaymentIdForOrderAsync(new Order { IdOrder = 10 }) is null && sdkHttp.Urls.Count == beforeRequests,
         "SDK recovery without saved preference never searches unrelated payments");
+    var preferenceConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["Store:WebhookUrl"] = "https://example.com/api/checkout/webhook"
+    }).Build();
+    var createdAt = DateTime.UtcNow;
+    await new MercadoPagoService(preferenceConfig).CreatePreferenceAsync(new Order
+    {
+        IdOrder = 10, DatePurchase = createdAt, ExpiresAt = createdAt.AddMinutes(20),
+        Items = [new() { ProductName = "SDK reservation check", Quantity = 1, FinalPrice = 100 }]
+    });
+    using var preferenceJson = JsonDocument.Parse(sdkHttp.PreferenceBody!);
+    var preferenceBody = preferenceJson.RootElement;
+    Check(preferenceBody.GetProperty("expires").GetBoolean() &&
+        Math.Abs((preferenceBody.GetProperty("expiration_date_to").GetDateTimeOffset() -
+            new DateTimeOffset(createdAt.AddMinutes(20))).TotalMilliseconds) < 1,
+        "SDK preference uses the order's exact 20-minute expiration instead of an independent deadline");
 }
 finally
 {
@@ -195,10 +212,24 @@ if (args.Contains("--database"))
         await db.Database.ExecuteSqlRawAsync("""
             INSERT INTO "PRODUCTS" ("ProductName", "UnitPrice", "Stock", "Type")
             VALUES ('Security check', 123.45, 1, 'PHYSICAL');
+            INSERT INTO "CUSTOMERS" ("Email") VALUES ('migration-tracking@example.invalid');
+            INSERT INTO "ORDERS" ("Id_customer", "Status", "DatePurchase", "MercadoPagoPreferenceId", "TotalAmount")
+            SELECT "Id_customer", 'PENDING_PAYMENT', CURRENT_TIMESTAMP, 'legacy-active', 100
+            FROM "CUSTOMERS" WHERE "Email" = 'migration-tracking@example.invalid';
+            INSERT INTO "ORDERS" ("Id_customer", "Status", "DatePurchase", "MercadoPagoPreferenceId", "TotalAmount")
+            SELECT "Id_customer", 'CANCELLED', CURRENT_TIMESTAMP - interval '3 days', 'legacy-cancelled', 100
+            FROM "CUSTOMERS" WHERE "Email" = 'migration-tracking@example.invalid';
             """);
         await db.Database.MigrateAsync();
         Check(await db.ProductPriceHistory.AnyAsync(h => h.Reason == "INITIAL_SNAPSHOT" && h.UnitPrice == 123.45m),
             "upgrading an existing database seeds observed prices without inventing historical timestamps");
+        var legacyActive = await db.Orders.AsNoTracking().SingleAsync(o => o.MercadoPagoPreferenceId == "legacy-active");
+        var legacyCancelled = await db.Orders.AsNoTracking().SingleAsync(o => o.MercadoPagoPreferenceId == "legacy-cancelled");
+        Check(legacyActive.ExpiresAt == legacyActive.DatePurchase.AddMinutes(30) && legacyActive.NextPaymentCheckAt is not null &&
+            legacyActive.PaymentCheckAttempts == 0 && legacyCancelled.NextPaymentCheckAt is null,
+            "tracking migration preserves issued preference deadlines and excludes historical cancelled orders from polling");
+        await db.Orders.Where(o => o.MercadoPagoPreferenceId == "legacy-active" || o.MercadoPagoPreferenceId == "legacy-cancelled").ExecuteDeleteAsync();
+        await db.Customers.Where(c => c.Email == "migration-tracking@example.invalid").ExecuteDeleteAsync();
         var customer = new Customer { Email = "security-check@example.invalid" };
         var product = await db.Products.SingleAsync();
         db.Customers.Add(customer); await db.SaveChangesAsync();
@@ -274,28 +305,37 @@ if (args.Contains("--database"))
         controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("idCustomer", customer.IdCustomer.ToString())], "security-check"));
         Check(Code(await controller.SyncPayment(int.MaxValue)) == 404,
             "nonexistent recovery order refused");
+        async Task MakeDue() => await db.Orders.Where(o => o.IdOrder == order.IdOrder)
+            .ExecuteUpdateAsync(update => update.SetProperty(o => o.NextPaymentCheckAt, DateTime.UtcNow.AddSeconds(-1)));
+        await MakeDue();
         payment.Result = verified with { ExternalReference = (order.IdOrder + 1).ToString() };
         Check(Code(await controller.SyncPayment(order.IdOrder)) == 409,
             "payment from another order cannot approve the requested order");
+        await MakeDue();
         payment.Result = verified with { ExternalReference = null };
         Check(Code(await controller.SyncPayment(order.IdOrder)) == 409,
             "unreferenced payment cannot approve requested order");
+        await MakeDue();
         payment.Result = verified with { Amount = 1 };
         Check(Code(await controller.SyncPayment(order.IdOrder)) == 409 &&
             (await db.Orders.AsNoTracking().SingleAsync()).Status == "PENDING_PAYMENT",
             "browser recovery cannot bypass amount/currency verification");
+        await MakeDue();
         db.ChangeTracker.Clear(); payment.Result = verified;
         payment.FoundPaymentId = null;
         beforeLookups = payment.Lookups;
         Check(Code(await controller.SyncPayment(order.IdOrder)) == 204 && payment.Lookups == beforeLookups &&
             (await db.Orders.AsNoTracking().SingleAsync()).Status == "PENDING_PAYMENT", "preference with no payment stays pending");
+        await MakeDue();
         payment.Failure = new HttpRequestException();
         Check(Code(await controller.SyncPayment(order.IdOrder)) == 503 &&
             (await db.Orders.AsNoTracking().SingleAsync()).Status == "PENDING_PAYMENT", "search outage cannot approve order");
+        await MakeDue();
         payment.Failure = null; payment.FoundPaymentId = 123;
         payment.Result = verified with { Status = "pending" };
         Check(Code(await controller.SyncPayment(order.IdOrder)) == 204 &&
             (await db.Orders.AsNoTracking().SingleAsync()).Status == "PAYMENT_PROCESSING", "recovery without return ID queries preference and does not trust browser approval");
+        await MakeDue();
         db.ChangeTracker.Clear(); payment.Result = verified;
         Check(Code(await controller.SyncPayment(order.IdOrder)) == 204 &&
             (await db.Orders.AsNoTracking().SingleAsync()).Status == "APPROVED", "lost/invalid webhook recovered from provider without disabling signature validation");
@@ -311,6 +351,18 @@ if (args.Contains("--database"))
         await StatisticsChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options, customer.IdCustomer, Check);
         await DashboardOverviewChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options, customer.IdCustomer, Check);
         await TagManagementChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options, Check);
+        await ProductStockChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options, Check);
+        await PaymentSchedulingChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
+            customer.IdCustomer, Check);
+        await CheckoutConcurrencyChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
+            customer.IdCustomer, Check);
+        await HttpPaymentSecurityChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
+            customer.IdCustomer, Check);
+        if (args.Contains("--redis"))
+            await PinLoginSecurityChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
+                local.GetConnectionString("RedisConnection") ?? throw new InvalidOperationException("Configure ConnectionStrings__RedisConnection."), Check);
+        await OrderWorkNotificationChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
+            customer.IdCustomer, Check);
     }
     finally
     {
@@ -393,6 +445,7 @@ sealed class FakePayment : IPaymentService
 sealed class FakeSdkHttp : MercadoPago.Http.IHttpClient
 {
     public List<string> Urls { get; } = [];
+    public string? PreferenceBody { get; private set; }
     public string SearchBody { get; set; } = """
         {"elements":[
           {"preference_id":"other-preference","external_reference":"10","payments":[{"id":999,"status":"approved"}]},
@@ -406,6 +459,12 @@ sealed class FakeSdkHttp : MercadoPago.Http.IHttpClient
         CancellationToken cancellationToken = default)
     {
         var url = request.Url.ToString(); Urls.Add(url);
+        if (url.Contains("/checkout/preferences"))
+        {
+            PreferenceBody = request.Content;
+            return Task.FromResult(new MercadoPagoResponse(200, new Dictionary<string, string>(),
+                """{"id":"sdk-test-preference","init_point":"https://example.com/pay"}"""));
+        }
         if (url.Contains("/merchant_orders/search"))
         {
             var limit = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(url).Query)["limit"];

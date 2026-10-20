@@ -8,7 +8,9 @@ import useProductDetail from "../hooks/useProductDetail";
 import RichTextContent from "../../../shared/rich-text/RichTextContent";
 import { money } from "../../../shared/utils/format.js";
 import { hasRouteAccess, CUSTOMER_ROLES } from "../../auth/model/access";
+import { IconArrowLeft, IconCheck, IconDownload, IconPackage, IconShoppingBag } from "@tabler/icons-react";
 import "../catalog.css";
+import "../product-detail.css";
 
 export default function ProductDetail() {
     const { id } = useParams();
@@ -27,7 +29,7 @@ function ProductDetailContent({ id }) {
         return (
             <div className="page">
                 <p role="alert">{error}</p>
-                <Link to="/">Volver a productos</Link>
+                <Link to="/"> Volver a productos</Link>
             </div>
         );
     if (loading || !product)
@@ -41,24 +43,34 @@ function ProductDetailContent({ id }) {
     const added = cart.some((item) => item.id === product.id);
     const digitalInCart = product.type === "DIGITAL" && added;
     return (
-        <div className="page">
+        <div className="page product-detail-page">
             <Link to="/" className="back-link">
-                Volver a productos
+                <IconArrowLeft size={17} aria-hidden="true" /> Volver a productos
             </Link>
-            <section className="product-detail">
+            <section className="product-detail" aria-labelledby="product-detail-title">
                 <ProductGallery product={detail} />
                 <div className="detail-copy">
-                    {/* <span className="product-category">
-                        {detail.category} ·{" "}
-                        {product.type === "PHYSICAL" ? "Físico" : "Digital"}
-                    </span> */}
-                    <h1>{detail.name}</h1>
+                    <h1 id="product-detail-title">{detail.name}</h1>
+                    {detail.tags.length > 0 && (
+                        <ul className="detail-tags" aria-label="Tags del producto">
+                            {detail.tags.map((tag) => <li key={tag}>{tag}</li>)}
+                        </ul>
+                    )}
+                    <div className="detail-price">
+                        {product.discounted && (
+                            <div className="detail-price-offer">
+                                <del aria-label="Precio original">{money(product.unitPrice)}</del>
+                                <span className="product-discount">Con descuento</span>
+                            </div>
+                        )}
+                        <div className="detail-price-current">{money(product.price)} <span>ARS</span></div>
+                    </div>
                     <div
                         className="product-format-picker"
                         role="group"
                         aria-label="Elegir formato"
                     >
-                        
+                        <p>Elegí el formato</p>
                         <div>
                             {variants.map((variant) => (
                                 <button
@@ -68,12 +80,16 @@ function ProductDetailContent({ id }) {
                                     onClick={() => selectVariant(variant.id)}
                                     aria-pressed={variant.id === product.id}
                                 >
-                                    <strong>
-                                        {variant.type === "PHYSICAL"
-                                            ? "Físico"
-                                            : "Digital"}
-                                    </strong>
-                                    <span>{money(variant.price)}</span>
+                                    <span className="detail-format-heading">
+                                        {variant.type === "PHYSICAL" ? <IconPackage size={19} aria-hidden="true" /> : <IconDownload size={19} aria-hidden="true" />}
+                                        <strong>
+                                            {variant.type === "PHYSICAL"
+                                                ? "Físico"
+                                                : "Digital"}
+                                        </strong>
+                                        <span className="detail-format-indicator" aria-hidden="true">{variant.id === product.id && <IconCheck size={12} />}</span>
+                                    </span>
+                                    <span className="detail-format-price">{money(variant.price)}</span>
                                     {variant.discounted && (
                                         <small>Con descuento</small>
                                     )}
@@ -81,74 +97,57 @@ function ProductDetailContent({ id }) {
                             ))}
                         </div>
                     </div>
-                    <div className="detail-price">
-                        {product.discounted && (
-                            <>
-                                <del aria-label="Precio original">
-                                    {money(product.unitPrice)}
-                                </del>
-                                <span className="product-discount">
-                                    Con descuento
-                                </span>
-                            </>
-                        )}
-                        <div>
-                            {money(product.price)} <span>ARS</span>
-                        </div>
-                    </div>
-                    <p aria-live="polite">
+                    <p className={`detail-availability${unavailable ? ' is-unavailable' : ''}`} aria-live="polite">
+                        {product.type === "PHYSICAL" ? <IconPackage size={18} aria-hidden="true" /> : <IconDownload size={18} aria-hidden="true" />}
+                        <span>
                         {product.type === "PHYSICAL"
                             ? `Stock disponible: ${stock}.`
                             : "Descarga disponible una vez aprobado el pago."}
+                        </span>
                     </p>
-                    <button
-                        className="btn-primary"
-                        disabled={unavailable || digitalInCart}
-                        onClick={() => {
-                            if (!auth.isAuthenticated) {
-                                navigate("/auth", {
-                                    state: { from: `/products/${id}` },
+                    <div className="detail-purchase-actions">
+                        <button
+                            className="btn-primary"
+                            disabled={unavailable || digitalInCart}
+                            onClick={() => {
+                                if (!auth.isAuthenticated) {
+                                    navigate("/auth", {
+                                        state: { from: `/products/${id}` },
+                                    });
+                                    return;
+                                }
+                                if (!hasRouteAccess(auth, CUSTOMER_ROLES)) {
+                                    navigate("/");
+                                    return;
+                                }
+                                addToCart({
+                                    ...product,
+                                    name: detail.name,
+                                    thumbnail: detail.thumbnail,
                                 });
-                                return;
-                            }
-                            if (!hasRouteAccess(auth, CUSTOMER_ROLES)) {
-                                navigate("/");
-                                return;
-                            }
-                            addToCart({
-                                ...product,
-                                name: detail.name,
-                                thumbnail: detail.thumbnail,
-                            });
-                            setShowAddedModal(true);
-                        }}
-                    >
-                        {unavailable
-                            ? "Sin stock"
-                            : digitalInCart
-                              ? "Ya está en el carrito"
-                              : added
-                                ? "Agregar otra unidad"
-                                : "Agregar al carrito"}
-                    </button>
-                    {(added || digitalInCart) && (
-                        <Link className="btn-secondary" to="/cart">
-                            Ver carrito
-                        </Link>
-                    )}
-                    {detail.tags.length > 0 && (
-                        <ul
-                            className="detail-tags"
-                            aria-label="Tags del producto"
+                                setShowAddedModal(true);
+                            }}
                         >
-                            {detail.tags.map((tag) => (
-                                <li key={tag}>{tag}</li>
-                            ))}
-                        </ul>
-                    )}
-                    
-                    <RichTextContent value={detail.description} />
+                            <IconShoppingBag size={20} aria-hidden="true" />
+                            {unavailable
+                                ? "Sin stock"
+                                : digitalInCart
+                                  ? "Ya está en el carrito"
+                                  : added
+                                    ? "Agregar otra unidad"
+                                    : "Agregar al carrito"}
+                        </button>
+                        {(added || digitalInCart) && (
+                            <Link className="btn-secondary" to="/cart">
+                                Ver carrito
+                            </Link>
+                        )}
+                    </div>
                 </div>
+            </section>
+            <section className="detail-description" aria-labelledby="detail-description-title">
+                <h2 id="detail-description-title">Sobre este producto</h2>
+                <RichTextContent value={detail.description} />
             </section>
             {showAddedModal && (
                 <AddedToCartModal

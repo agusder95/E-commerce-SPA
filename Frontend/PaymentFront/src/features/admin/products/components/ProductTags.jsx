@@ -16,7 +16,7 @@ export default function ProductTags({ tags, selectedIds, type, loaded, newTag, o
     {loaded && !available.length && <p>No hay tags personalizados. Abrí “+” para crear uno.</p>}
     {managementOpen && <div id={panelId} className="tag-manager-panel">
       <label htmlFor="new-tag">Nuevo tag (máximo 15 caracteres)</label>
-      <input id="new-tag" maxLength={15} value={newTag} onChange={event => onNewTag(event.target.value.normalize('NFC'))} placeholder="Ej. Diseño" />
+      <input id="new-tag" maxLength={15} value={newTag} onChange={event => onNewTag(event.target.value.normalize('NFC'))} placeholder="Ej. Aves" />
       <button type="button" className="btn-secondary" disabled={!loaded || !newTag.trim()} onClick={onCreate}>Crear tag</button>
       <p>Para eliminar tags, marcalos en la lista de arriba. Se quitarán también de todos los productos que los contengan.</p>
       <button type="button" className="btn-secondary" disabled={!loaded || !selectedCount} onClick={onDelete}>Eliminar tags seleccionados ({selectedCount})</button>

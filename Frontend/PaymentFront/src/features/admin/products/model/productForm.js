@@ -1,4 +1,5 @@
 import { matchesProductName } from '../../model/productSearch.js';
+import { compareTableValues, dateSortValue } from '../../model/tableSort.js';
 
 export const freshForm = () => ({ productName: '', unitPrice: '', stock: 0, type: 'PHYSICAL', description: '',
   thumbnail: '', digitalFileKey: '', digitalFiles: [], tagIds: [], digitalUnitPrice: '', gallery: [], discountPrice: '', discountEndDate: '' });
@@ -88,9 +89,16 @@ function compareStock(a, b, direction) {
 export function filterAdminProducts(products, section, status, sort, search = '') {
   return products.filter(product => matchesProductName(product.name, search) && (section === 'delete'
     ? product.isDeleted === (status === 'deleted') : !product.isDeleted)).sort((a, b) =>
-    sort === 'alphabetical' ? a.name.localeCompare(b.name, 'es', { sensitivity: 'base', numeric: true }) || a.id - b.id :
+    sort === 'alphabetical' || sort === 'name-asc' ? a.name.localeCompare(b.name, 'es', { sensitivity: 'base', numeric: true }) || a.id - b.id :
+      sort === 'name-desc' ? b.name.localeCompare(a.name, 'es', { sensitivity: 'base', numeric: true }) || a.id - b.id :
+      sort === 'type-asc' ? formatType(a.type).localeCompare(formatType(b.type), 'es') || a.id - b.id :
+      sort === 'type-desc' ? formatType(b.type).localeCompare(formatType(a.type), 'es') || a.id - b.id :
+      sort === 'price-asc' ? a.price - b.price || a.id - b.id :
+      sort === 'price-desc' ? b.price - a.price || a.id - b.id :
       sort === 'stock-asc' ? compareStock(a, b, 1) :
       sort === 'stock-desc' ? compareStock(a, b, -1) :
+      sort === 'created-asc' ? compareTableValues(dateSortValue(a.createdAt), dateSortValue(b.createdAt), 'asc') || a.id - b.id :
+      sort === 'created-desc' ? compareTableValues(dateSortValue(a.createdAt), dateSortValue(b.createdAt), 'desc') || a.id - b.id :
       sort === 'newest' ? new Date(b.createdAt) - new Date(a.createdAt) || b.id - a.id :
         new Date(a.createdAt) - new Date(b.createdAt) || a.id - b.id);
 }

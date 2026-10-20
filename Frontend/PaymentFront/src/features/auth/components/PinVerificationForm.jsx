@@ -10,11 +10,11 @@ export default function PinVerificationForm({ email, pinDigits, loading, resendT
       <PinInput value={pinDigits} onChange={onPinDigits} />
       <div className="resend-container">{resendTimer > 0
         ? <span className="resend-text">Reenviar código en {formatTime(resendTimer)}</span>
-        : <button type="button" className="resend-button" onClick={onResend}>Reenviar código</button>}</div>
+        : <button type="button" className="resend-button" onClick={onResend} disabled={loading}>Reenviar código</button>}</div>
       <button className="btn-primary" type="submit" disabled={loading || !canVerify}>
         {loading ? 'Verificando...' : 'Verificar'}
       </button>
     </form>
-    <p className="auth-change-email"><button type="button" className="resend-button" onClick={onChangeEmail}>Cambiar email</button></p>
+    <p className="auth-change-email"><button type="button" className="resend-button" onClick={onChangeEmail} disabled={loading}>Cambiar email</button></p>
   </>;
 }

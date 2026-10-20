@@ -4,8 +4,10 @@ namespace PaymentGateway.Infrastructure.Services;
 
 public sealed record AccessCodeEmail(string Subject, string Text, string Html)
 {
-    public static AccessCodeEmail Create(string pin)
+    public static AccessCodeEmail Create(string pin, int lifetimeSeconds = 300)
     {
+        var duration = lifetimeSeconds % 60 == 0
+            ? $"{lifetimeSeconds / 60} minutos" : $"{lifetimeSeconds} segundos";
         var htmlBody = $@"<!DOCTYPE html>
 <html lang=""es"">
 <head>
@@ -22,7 +24,7 @@ public sealed record AccessCodeEmail(string Subject, string Text, string Html)
             <h1 style=""margin:0; color:#333333; letter-spacing:5px;"">{WebUtility.HtmlEncode(pin)}</h1>
         </div>
         <p style=""margin-top:20px; font-size:14px; color:#666666;"">
-            Este código expira en 5 minutos. No lo compartas con nadie.
+            Este código expira en {duration}. No lo compartas con nadie.
         </p>
     </div>
 </body>
@@ -34,7 +36,7 @@ Solicitaste acceso al portal para descargar tu manual.
 
 Tu código de seguridad es: {pin}
 
-Este código expira en 5 minutos. No lo compartas con nadie.";
+Este código expira en {duration}. No lo compartas con nadie.";
 
         return new("Tu código de acceso seguro", textBody, htmlBody);
     }

@@ -1,5 +1,5 @@
 export const PIN_LENGTH = 6;
-export const RESEND_SECONDS = 300;
+export const RESEND_SECONDS = 60;
 export const PENDING_EMAIL_KEY = "pending-auth-email";
 export const PENDING_EMAIL_EXPIRES_KEY = "pending-auth-email-expires";
 

@@ -4,6 +4,7 @@ import { uploadAsset, importImageUrl, getDigitalPreview } from '../../api/admin'
 export default function useProductMedia({ busy, setBusy, setError, setNotice, setForm, digitalFiles }) {
   const [imageUrl, setImageUrl] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState('');
   function addImage(url) {
     setForm(previous => ({ ...previous, gallery: [...new Set([...previous.gallery, url])],
       thumbnail: previous.thumbnail || url }));
@@ -16,6 +17,7 @@ export default function useProductMedia({ busy, setBusy, setError, setNotice, se
   }
   async function uploadImages(files) {
     if (busy || !files.length) return;
+    setUploading('images');
     setBusy(true); setError(''); setNotice('');
     try {
       for (const file of files) {
@@ -24,18 +26,20 @@ export default function useProductMedia({ busy, setBusy, setError, setNotice, se
         const { url } = await uploadAsset(file, 'image');
         addImage(url);
       }
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+    } catch (e) { setError(e.message); } finally { setUploading(''); setBusy(false); }
   }
   async function importUrl() {
     if (busy || !imageUrl.trim()) return;
+    setUploading('images');
     setBusy(true); setError(''); setNotice('');
     try {
       const { url } = await importImageUrl(imageUrl.trim());
       addImage(url); setImageUrl('');
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+    } catch (e) { setError(e.message); } finally { setUploading(''); setBusy(false); }
   }
   async function uploadDigital(files) {
     if (!files.length || busy) return;
+    setUploading('digital');
     setBusy(true); setError(''); setNotice('');
     try {
       if (digitalFiles.length + files.length > 50) throw new Error('Podés cargar hasta 50 archivos por producto.');
@@ -44,7 +48,7 @@ export default function useProductMedia({ busy, setBusy, setError, setNotice, se
         const { key } = await uploadAsset(file, 'digital');
         setForm(previous => ({ ...previous, digitalFiles: [...previous.digitalFiles, { key, name: file.name }] }));
       }
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+    } catch (e) { setError(e.message); } finally { setUploading(''); setBusy(false); }
   }
   function removeDigital(key) {
     setForm(previous => ({ ...previous, digitalFiles: previous.digitalFiles.filter(file => file.key !== key) }));
@@ -67,7 +71,8 @@ export default function useProductMedia({ busy, setBusy, setError, setNotice, se
   }
 
 
-  return { imageUrl, dragging, onImageUrl: setImageUrl, onDragging: setDragging,
+  return { imageUrl, dragging, uploadingImages: uploading === 'images', uploadingDigital: uploading === 'digital',
+    onImageUrl: setImageUrl, onDragging: setDragging,
     onUploadImages: uploadImages, onImportUrl: importUrl, onUploadDigital: uploadDigital,
     onRemoveImage: removeImage, onRemoveDigital: removeDigital,
     onOpenDigital: openDigital,

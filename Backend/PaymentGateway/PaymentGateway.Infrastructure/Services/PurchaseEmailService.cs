@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PaymentGateway.Application.Interfaces;
 using PaymentGateway.Infrastructure.Persistence;
@@ -9,17 +8,17 @@ namespace PaymentGateway.Infrastructure.Services;
 
 // The paid transition and the pending flag are committed together. SMTP failures
 // never roll back a verified payment, and pending messages survive API restarts.
-public sealed class PurchaseEmailService(IServiceScopeFactory scopes, ILogger<PurchaseEmailService> logger) : BackgroundService
+public sealed class PurchaseEmailService(IServiceScopeFactory scopes, ILogger<PurchaseEmailService> logger, OrderWorkSignal? signal = null)
+    : ScheduledOrderWorker(signal ?? new OrderWorkSignal(), logger, TimeSpan.FromSeconds(15))
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task<DateTime?> RunAndGetNextAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
-        {
-            try { await SendPendingAsync(stoppingToken); }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (Exception exception) { logger.LogError(exception, "No se pudo procesar la cola de confirmaciones de compra."); }
-        }
+        await SendPendingAsync(cancellationToken);
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
+        var pending = await db.Orders.AnyAsync(o => o.ConfirmationEmailPending &&
+            (o.Status == "APPROVED" || o.Status == "PAID_REQUIRES_REVIEW"), cancellationToken);
+        return pending ? DateTime.UtcNow.AddSeconds(15) : null;
     }
 
     public async Task SendPendingAsync(CancellationToken cancellationToken = default)

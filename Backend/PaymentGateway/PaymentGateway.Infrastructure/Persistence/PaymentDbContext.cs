@@ -68,6 +68,9 @@ public partial class PaymentDbContext : DbContext
             entity.Property(e => e.ManuallyCancelled).HasDefaultValue(false);
             entity.Property(e => e.PreviousStatus).HasMaxLength(50);
             entity.Property(e => e.ShippingAddress).HasMaxLength(2000);
+            entity.Property(e => e.PaymentCheckAttempts).HasDefaultValue(0);
+            entity.HasIndex(e => e.NextPaymentCheckAt).HasFilter("\"NextPaymentCheckAt\" IS NOT NULL");
+            entity.HasIndex(e => e.ExpiresAt).HasFilter("\"Status\" IN ('Pending', 'PENDING_PAYMENT')");
 
             entity
                 .HasOne(d => d.Customer)

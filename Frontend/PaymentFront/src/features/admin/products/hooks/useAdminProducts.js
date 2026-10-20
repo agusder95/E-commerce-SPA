@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getAdminProducts, saveProduct, changeProductStatus, getTags, createTag, deleteTags } from '../../api/admin';
 import useProductMedia from './useProductMedia';
+import useProductStock from './useProductStock';
 import { freshForm, tagKey, canonicalTag, validateTag, similarTags, productFormErrors, paginateAdminProducts,
   productNameForSave, changeProductType, toProductPayload, filterAdminProducts } from '../model/productForm';
 
@@ -25,6 +26,7 @@ export default function useAdminProducts() {
   const [confirmation, setConfirmation] = useState(null);
   const [successModal, setSuccessModal] = useState('');
   const mediaEditor = useProductMedia({ busy, setBusy, setError, setNotice, setForm, digitalFiles: form?.digitalFiles || [] });
+  const stockEditor = useProductStock({ busy, setBusy, setError, setNotice, setProducts });
 
   useEffect(() => {
     let active = true;
@@ -47,10 +49,12 @@ export default function useAdminProducts() {
   }, [successModal]);
 
   function changeSection(next) {
+    if (busy || stockEditor.hasChanges) return;
     setSection(next); setSelected([]); setPage(1); setError(''); setNotice(''); mediaEditor.reset();
     setNewTag(''); setTagManagerOpen(false); setForm(next === 'new' ? freshForm() : null);
   }
   function edit(product) {
+    if (busy || stockEditor.hasChanges) return;
     const gallery = [...new Set([...(product.gallery || []), ...(product.thumbnail ? [product.thumbnail] : [])])];
     setError(''); setNotice(''); mediaEditor.reset(); setNewTag(''); setTagManagerOpen(false);
     setForm({ ...freshForm(), ...product, originalType: product.type, gallery, tagIds: tags.filter(tag => product.tags.some(name => tagKey(name) === tagKey(tag.name))).map(tag => tag.idTag),
@@ -126,7 +130,7 @@ export default function useAdminProducts() {
     if (!busy && selectedTags.length) setConfirmation({ kind: 'deleteTags', tags: selectedTags });
   }
   return {
-    section, form, sort, search, status, selected, busy, loading, error, notice, visible, confirmation, pagination, setPage,
+    section, form, sort, search, status, selected, busy, loading, error, notice, visible, confirmation, pagination, setPage, stockEditor,
     setSearch: value => { setSearch(value); setPage(1); },
     selectedCount: selectedProducts.length, successModal, dismissSuccess: () => setSuccessModal(''),
     changeSection, edit, field, changeType, backToList, changeStatus,

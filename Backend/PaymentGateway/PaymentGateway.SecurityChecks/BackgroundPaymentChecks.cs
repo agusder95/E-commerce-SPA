@@ -34,7 +34,7 @@ internal static class BackgroundPaymentChecks
             var product = new Product { ProductName = name, UnitPrice = 100, Type = type, Stock = stock };
             db.Products.Add(product); await db.SaveChangesAsync();
             var order = new Order { IdCustomer = customerId, TotalAmount = 100, Status = status,
-                DatePurchase = DateTime.UtcNow.AddHours(-2), MercadoPagoPreferenceId = "background-test-" + name,
+                DatePurchase = DateTime.UtcNow.AddHours(-2), NextPaymentCheckAt = DateTime.UtcNow.AddSeconds(-1), MercadoPagoPreferenceId = "background-test-" + name,
                 Items = [new OrderItem { IdProduct = product.IdProduct, ProductType = type, ProductName = name,
                     Quantity = 1, FinalPrice = 100, DigitalFileKey = type == "DIGITAL" ? "products/purchased/book.pdf" : null }] };
             db.Orders.Add(order); await db.SaveChangesAsync();
@@ -100,6 +100,8 @@ internal static class BackgroundPaymentChecks
         sent.ConfirmationEmailPending = false; sent.ConfirmationEmailSentAt = DateTime.UtcNow;
         await db.SaveChangesAsync(); db.ChangeTracker.Clear();
         payments.Unavailable.Clear();
+        await db.Orders.Where(o => o.IdOrder == failed.IdOrder).ExecuteUpdateAsync(update =>
+            update.SetProperty(o => o.NextPaymentCheckAt, DateTime.UtcNow.AddSeconds(-1)));
         var paidSearches = payments.Searched.Count(id => id == paid.IdOrder);
         worker = new PaymentReconciliationWorker(provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<PaymentReconciliationWorker>.Instance);
         await worker.ReconcilePendingAsync();

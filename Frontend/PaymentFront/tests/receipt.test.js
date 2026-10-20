@@ -12,12 +12,27 @@ test('receipt preserves purchase snapshots, coupon, quantities and Spanish statu
   const receipt = purchaseReceipt(purchase);
   assert.equal(receipt.status, 'Pago aprobado');
   assert.equal(receipt.date, '16/10/2026');
+  assert.equal(receipt.time, '12:00');
   assert.deepEqual([receipt.subtotal, receipt.discount, receipt.total, receipt.quantity], [400, 130, 270, 3]);
   assert.equal(receipt.coupon, 'AHORRO');
   assert.equal(receipt.items[1].discount, 120);
   assert.equal(receipt.items[1].type, 'Físico');
   assert.equal(purchaseReceipt({ ...purchase, status: 'CANCELLED' }).status, 'Compra cancelada');
   assert.equal(purchaseReceipt({ ...purchase, status: 'unknown' }).status, 'Estado por revisar');
+});
+
+test('receipt uses Argentina time and date even when UTC falls on the next day', () => {
+  const receipt = purchaseReceipt({ ...purchase, createdAt: '2026-10-17T01:35:00Z' });
+  assert.equal(receipt.date, '16/10/2026');
+  assert.equal(receipt.time, '22:35');
+});
+
+test('receipt handles missing or invalid purchase timestamps', () => {
+  for (const createdAt of [undefined, null, '', 'invalid']) {
+    const receipt = purchaseReceipt({ ...purchase, createdAt });
+    assert.equal(receipt.date, 'Sin fecha');
+    assert.equal(receipt.time, 'Sin hora');
+  }
 });
 
 test('receipt PDF is a real narrow PDF with the order and totals', () => {
@@ -27,6 +42,7 @@ test('receipt PDF is a real narrow PDF with the order and totals', () => {
   assert.ok(pdf.includes('AHORRO'));
   assert.ok(pdf.includes('270,00'));
   assert.ok(pdf.includes('Compra #42'));
+  assert.ok(pdf.includes('Hora: 12:00'));
   assert.ok(Math.abs(doc.internal.pageSize.getWidth() - 80) < 0.01);
   assert.ok(doc.internal.pageSize.getHeight() < 200);
 });
