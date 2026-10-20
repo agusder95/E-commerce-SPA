@@ -8,6 +8,9 @@ using PaymentGateway.Infrastructure.Persistence;
 using System.Globalization;
 using MercadoPago.Error;
 using MercadoPago.Webhook;
+using Npgsql;
+using Microsoft.Extensions.Options;
+using PaymentGateway.Infrastructure.Services;
 
 namespace PaymentGateway.API.Controllers;
 
@@ -24,10 +27,12 @@ public class CheckoutController : ControllerBase
     private readonly IConfiguration _config;
     private readonly ILogger<CheckoutController> _logger;
     private readonly IPaymentReconciliationService _reconciliation;
+    private readonly PaymentTrackingOptions _tracking;
 
     //Inyeccion
     public CheckoutController(IOrderRepository orderRepository, IPaymentService paymentService, PaymentDbContext db,
-        IConfiguration config, ILogger<CheckoutController> logger, IPaymentReconciliationService reconciliation)
+        IConfiguration config, ILogger<CheckoutController> logger, IPaymentReconciliationService reconciliation,
+        IOptions<PaymentTrackingOptions>? tracking = null)
     {
         _orderRepository = orderRepository;
         _paymentService = paymentService;
@@ -35,6 +40,7 @@ public class CheckoutController : ControllerBase
         _config = config;
         _logger = logger;
         _reconciliation = reconciliation;
+        _tracking = tracking?.Value ?? new PaymentTrackingOptions();
     }
 
     private string? WebhookSecret
@@ -110,6 +116,26 @@ public class CheckoutController : ControllerBase
     [HttpPost("create-order")]
     public async Task<IActionResult> CreateFinalOrder([FromBody] CreateOrderRequest request)
     {
+        try
+        {
+            return await CreateFinalOrderCore(request);
+        }
+        catch (Exception exception) when (exception.GetBaseException() is PostgresException
+            { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected })
+        {
+            // The core's transaction has been disposed and rolled back before responding.
+            // Do not retry automatically: creating a payment preference is an external side effect.
+            _logger.LogWarning(exception, "Conflicto de concurrencia al crear una orden de checkout.");
+            return Conflict(new
+            {
+                Code = "CHECKOUT_CONFLICT",
+                Message = "La disponibilidad cambió mientras procesábamos tu compra. Revisá el carrito y volvé a intentarlo."
+            });
+        }
+    }
+
+    private async Task<IActionResult> CreateFinalOrderCore(CreateOrderRequest request)
+    {
         if (!int.TryParse(User.FindFirst("idCustomer")?.Value, out var customerId)) return Unauthorized();
         if (WebhookSecret is null) return PaymentsNotConfigured();
         if (!PaymentUrls.IsValidWebhook(_config["Store:WebhookUrl"])) return PaymentsNotConfigured("Store:WebhookUrl");
@@ -157,10 +183,13 @@ public class CheckoutController : ControllerBase
         }
         foreach (var item in items)
             item.DiscountApplied = item.BeforeCouponUnitPrice!.Value - item.FinalPrice;
+        var createdAt = DateTime.UtcNow;
         var newOrder = new Order
         {
             IdCustomer = customerId,
-            DatePurchase = DateTime.UtcNow,
+            DatePurchase = createdAt,
+            ExpiresAt = createdAt.AddMinutes(_tracking.ReservationMinutes),
+            NextPaymentCheckAt = createdAt.AddSeconds(_tracking.InitialCheckSeconds),
             Status = "PENDING_PAYMENT",
             SubTotal = items.Sum(i => i.OriginalUnitPrice * i.Quantity),
             TotalAmount = items.Sum(i => i.FinalPrice * i.Quantity),
@@ -237,6 +266,8 @@ public class CheckoutController : ControllerBase
         var order = await _db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.IdOrder == orderId && o.IdCustomer == customerId);
         if (order is null) return NotFound();
         if (order.Status is "APPROVED" or "PAID_REQUIRES_REVIEW") return NoContent();
+        if (order.NextPaymentCheckAt > DateTime.UtcNow ||
+            (order.NextPaymentCheckAt is null && order.LastPaymentCheckAt is not null)) return NoContent();
         // La preferencia guardada decide qué pagos consultar, nunca los IDs/estados del navegador.
         var result = await _reconciliation.ReconcileAsync(null, order);
         return result == PaymentReconciliationResult.Success ? NoContent() : PaymentResult(result);

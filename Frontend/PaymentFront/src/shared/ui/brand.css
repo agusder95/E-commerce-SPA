@@ -1,0 +1,14 @@
+.brand-logo { display: block; width: 42px; height: 56px; object-fit: contain; flex-shrink: 0; }
+.brand-name { max-width: 150px; font: 700 15px/1.25 'Manrope', sans-serif; letter-spacing: -.3px; color: #345343; text-align: center; }
+.navbar-brand { flex-shrink: 0; }
+.receipt-brand { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+.receipt-brand .brand-name { text-align: left; }
+@media (max-width: 480px) {
+    .navbar .navbar-inner { gap: 8px; padding-inline: 16px; }
+    .navbar .navbar-brand { gap: 6px; }
+    .navbar .brand-logo { width: 30px; height: 44px; }
+    .navbar .brand-name { max-width: 102px; font-size: 12px; }
+    .navbar .navbar-actions { gap: 4px; }
+    .navbar .login-link { padding: 10px; }
+    .navbar .login-link span { display: none; }
+}

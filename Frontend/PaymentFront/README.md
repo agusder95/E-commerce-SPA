@@ -48,6 +48,26 @@ El endpoint se configura mediante `VITE_API_BASE_URL` en `.env.local`; el valor 
 
 El carrito conserva localmente las órdenes iniciadas y los productos incluidos. Al volver a la tienda, verifica el pago con el backend y elimina únicamente las cantidades compradas, aunque se haya cerrado la pestaña durante el pago. Los productos agregados posteriormente se conservan. Esta recuperación requiere que la orden se haya iniciado con esta versión y que se mantenga el almacenamiento del navegador.
 
+### Seguimiento de pagos
+
+`PaymentTrackingProvider` comparte las consultas del carrito y la página de resultado. Sólo funciona con una sesión y órdenes del usuario actual: sin órdenes ni suscriptores no programa consultas. Lee exclusivamente `GET /api/order/{id}`; los webhooks y el proceso del backend se encargan de consultar Mercado Pago. El endpoint devuelve también `expiresAt` y filtra por el dueño de la orden sin cargar sus ítems.
+
+Mientras el estado no cambia, los intervalos son 3, 6, 12, 24 y 30 segundos. Un cambio de estado reinicia la espera; los errores usan intervalos crecientes hasta 60 segundos. Una misma orden tiene una sola solicitud en curso aunque la página de resultado y el carrito estén siguiendo su estado. Se abortan solicitudes y temporizadores al ocultar la pestaña, perder conexión o cerrar sesión. Al volver o reconectarse se actualiza el estado, agrupando eventos de foco repetidos. Cada pestaña visible mantiene su seguimiento local; la coordinación de consultas al proveedor entre instancias está en el backend.
+
+Las aprobadas y `PAID_REQUIRES_REVIEW` liquidan las cantidades compradas y terminan el seguimiento. Las rechazadas/canceladas conservan la copia del carrito con `trackingStopped`, sin seguir consultándose. Si después se confirma un pago tardío, al visitar Mis compras la respuesta oficial permite liquidar esa copia. Un reintento explícito de un pago rechazado reactiva el seguimiento hasta que cambie el estado o venza la preferencia. La página de resultado oculta el enlace de pago al vencer, usando el `ExpiresAt` de 20 minutos del backend (30 minutos para las preferencias anteriores a la migración).
+
+Un 401 cierra la sesión y detiene todas las consultas; un 403/404 detiene únicamente la orden inaccesible. Las respuestas de sesiones anteriores se descartan. Mis compras vuelve a cargar su contenido al cambiar de usuario y no muestra la lista anterior mientras carga.
+
+Las pruebas de `tests/payment-tracker.test.js` usan reloj y transporte controlados para verificar intervalos, pausas, concurrencia, cierre de sesión y reintentos. La comprobación `tests/browser/payment-tracking.js` ejercita React, navegación, almacenamiento y transporte HTTP en un navegador con respuestas de API simuladas, sin pagos reales. Se ejecuta en una sesión aislada de agent-browser, con el frontend abierto en localhost:
+
+```bash
+npx --yes agent-browser --session payment-qa open http://127.0.0.1:5173/
+npx --yes agent-browser --session payment-qa eval --stdin < tests/browser/payment-tracking.js
+npx --yes agent-browser --session payment-qa close
+```
+
+Para el cierre completo, ejecutar `npm test`, `npm run lint`, `npm run build` y las comprobaciones de PostgreSQL de [Backend](../../Backend/README.md). En Node 26, `node --test --test-isolation=none tests/*.test.js` muestra además el detalle de cada caso en lugar de agrupar por archivo.
+
 ## Rutas de la aplicación
 
 | Ruta | Vista |
@@ -88,7 +108,7 @@ La salida se genera en `dist/`. Esta carpeta está excluida por Git y debe gener
 
 ## Interfaz visual
 
-La identidad usa el nombre provisional **Forma**. El catálogo consume /api/products; las imágenes se obtienen de Cloudinary mediante las URLs guardadas en PostgreSQL. Una base sin productos muestra el catálogo vacío.
+La identidad usa el nombre **Juegos Fueguinos AMB** y el logo compartido en `public/logo.png`. El catálogo consume /api/products; las imágenes se obtienen de Cloudinary mediante las URLs guardadas en PostgreSQL. Una base sin productos muestra el catálogo vacío.
 
 - `/products/:id`: detalle del producto y acceso al carrito.
 - `/about`: presentación provisional, pendiente de contenido personal.
@@ -96,6 +116,8 @@ La identidad usa el nombre provisional **Forma**. El catálogo consume /api/prod
 - Carrito y compras requieren sesión. Administración requiere el rol `Admin` del contexto existente. La protección del frontend no reemplaza la autorización del servidor.
 
 Las vistas administrativas consumen /api/admin: permiten guardar/desactivar productos, subir imágenes y archivos, crear cupones y consultar compras y estadísticas reales. El backend exige rol administrador.
+
+En `/admin/products` → **Editar**, los encabezados Producto, Tipo, Precio y Stock alternan entre orden ascendente y descendente. Los controles −/+ están disponibles para los productos físicos. **Actualizar stock** se habilita únicamente cuando hay cambios pendientes y permite revisarlos y guardarlos juntos. Si se deshacen todos los ajustes, el botón vuelve a deshabilitarse. Los cambios se conservan al buscar, ordenar o paginar; el botón de información explica su funcionamiento. También pueden descartarse. El guardado usa `PATCH /api/admin/products/stock`, sin reenviar datos del producto. Si hubo una venta u otro cambio de stock, se rechaza el lote completo y se recarga la lista para revisar los valores actuales.
 
 Los productos digitales admiten hasta 50 archivos de 100 MB cada uno, con descargas individuales en Mis compras. La descripción utiliza un editor Lexical con formato, listas anidadas, sangrías y alineación; el catálogo muestra ese formato sin cargar el editor y mantiene las descripciones anteriores en texto plano.
 

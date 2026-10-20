@@ -67,3 +67,37 @@ test('coupon filters separate active, expired and inactive and sort by creation 
   assert.deepEqual(filterCoupons(coupons, 'all', 'created-desc', now).map(c => c.idCoupon), [4, 2, 1, 3]);
   assert.deepEqual(filterCoupons(coupons, 'inactive', 'created-asc', now).map(c => c.idCoupon), [3]);
 });
+
+test('offer headers sort displayed text, numeric prices, simulated prices and real dates', () => {
+  const products = [
+    { id: 1, name: 'Zorzal', type: 'PHYSICAL', tags: [], unitPrice: 200, price: 40, discountPrice: 40, discountEndDate: '2099-03-01' },
+    { id: 2, name: 'Ave 10', type: 'DIGITAL', tags: [], unitPrice: 100, price: 90, discountPrice: 90, discountEndDate: '2099-01-01' },
+    { id: 3, name: 'Ave 2', type: 'PHYSICAL', tags: [], unitPrice: 50, price: 50, discountPrice: null },
+  ];
+  const ids = (sort, discount = '25') => filterOfferProducts(products, [], sort, 'all', now, '', discount).map(p => p.id);
+  const expected = {
+    'name-asc': [3, 2, 1], 'name-desc': [1, 2, 3], 'type-asc': [2, 1, 3], 'type-desc': [1, 3, 2],
+    'price-asc': [3, 2, 1], 'price-desc': [1, 2, 3], 'currentPrice-asc': [1, 3, 2], 'currentPrice-desc': [2, 3, 1],
+    'simulatedPrice-asc': [3, 2, 1], 'simulatedPrice-desc': [1, 2, 3], 'expiration-asc': [2, 1, 3], 'expiration-desc': [1, 2, 3],
+  };
+  for (const [sort, order] of Object.entries(expected)) assert.deepEqual(ids(sort), order, sort);
+  assert.deepEqual(ids('simulatedPrice-desc', ''), [1, 2, 3]);
+  assert.deepEqual(ids('simulatedPrice-desc', 'invalid'), [1, 2, 3]);
+  assert.deepEqual(products.map(p => p.id), [1, 2, 3]);
+});
+
+test('coupon headers sort every data column with stable ties and missing dates last', () => {
+  const coupons = [
+    { idCoupon: 1, code: 'ZORZAL', discount: 5, productType: 'PHYSICAL', tags: ['Bosque'], cumulative: true, isActive: true, expirationDate: '2099-03-01', createdAt: '2026-01-31' },
+    { idCoupon: 2, code: 'AVE10', discount: 20, productType: 'DIGITAL', tags: ['Aves'], cumulative: false, isActive: false, expirationDate: null, createdAt: null },
+    { idCoupon: 3, code: 'AVE2', discount: 10, productType: null, tags: [], cumulative: false, isActive: true, expirationDate: '2020-01-01', createdAt: '2026-02-01' },
+  ];
+  const expected = {
+    'code-asc': [3, 2, 1], 'code-desc': [1, 2, 3], 'discount-asc': [1, 3, 2], 'discount-desc': [2, 3, 1],
+    'status-asc': [1, 2, 3], 'status-desc': [3, 2, 1], 'scope-asc': [2, 1, 3], 'scope-desc': [3, 1, 2],
+    'cumulative-asc': [2, 3, 1], 'cumulative-desc': [1, 2, 3], 'expiration-asc': [3, 1, 2], 'expiration-desc': [1, 3, 2],
+    'created-asc': [1, 3, 2], 'created-desc': [3, 1, 2],
+  };
+  for (const [sort, order] of Object.entries(expected)) assert.deepEqual(filterCoupons(coupons, 'all', sort, now).map(c => c.idCoupon), order, sort);
+  assert.deepEqual(coupons.map(c => c.idCoupon), [1, 2, 3]);
+});

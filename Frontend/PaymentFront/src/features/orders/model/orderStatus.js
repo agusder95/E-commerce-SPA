@@ -2,7 +2,7 @@ export const MP_CHECKOUT_URL = 'https://www.mercadopago.com.ar/checkout/v1/redir
 
 export function returnOrderId(params) {
   const id = params.get('orderId') || params.get('external_reference');
-  return /^[1-9]\d*$/.test(id ?? '') ? id : null;
+  return /^[1-9]\d*$/.test(id ?? '') && Number.isSafeInteger(Number(id)) && Number(id) <= 2147483647 ? id : null;
 }
 
 export const STATUS_LABELS = {

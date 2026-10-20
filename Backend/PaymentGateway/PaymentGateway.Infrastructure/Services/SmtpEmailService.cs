@@ -6,6 +6,8 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using PaymentGateway.Application.DTOs;
 using PaymentGateway.Application.Interfaces;
 using PaymentGateway.Domain.Entities;
 
@@ -15,16 +17,18 @@ public class SmtpEmailService : IEmailService
 {
     private readonly IConfiguration _config;
     private readonly ILogger<SmtpEmailService> _logger;
+    private readonly PinLoginOptions _pinOptions;
 
-    public SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> logger)
+    public SmtpEmailService(IConfiguration config, ILogger<SmtpEmailService> logger, IOptions<PinLoginOptions> pinOptions)
     {
         _config = config;
         _logger = logger;
+        _pinOptions = pinOptions.Value;
     }
 
     public Task SendPinEmailAsync(string toEmail, string pin)
     {
-        var content = AccessCodeEmail.Create(pin);
+        var content = AccessCodeEmail.Create(pin, _pinOptions.LifetimeSeconds);
         return SendAsync(toEmail, content.Subject, content.Text, content.Html);
     }
 

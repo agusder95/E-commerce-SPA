@@ -1,5 +1,6 @@
 import { expirationISO } from '../../../shared/utils/date.js';
 import { matchesProductName } from './productSearch.js';
+import { compareTableValues, dateSortValue, normalizeTableSort } from './tableSort.js';
 export const normalizeCouponCode = code => code.normalize('NFD').replace(/\p{M}/gu, '').trim().toUpperCase();
 const tagKey = tag => tag.normalize('NFD').replace(/\p{M}/gu, '').trim().toUpperCase();
 export const offerMoney = value => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
@@ -28,39 +29,45 @@ export function paginateOfferProducts(products, page) {
   return { page: current, pages, total: products.length, items: products.slice((current - 1) * 10, current * 10) };
 }
 
-export function filterOfferProducts(products, tags, sort, offerStatus = 'all', now = Date.now(), search = '') {
+export function filterOfferProducts(products, tags, sort, offerStatus = 'all', now = Date.now(), search = '', discount = '') {
   return products.filter(product => !product.isDeleted && matchesProductName(product.name, search) && tags.every(tag => product.tags.some(value => tagKey(value) === tagKey(tag))) &&
     (offerStatus === 'all' || hasActiveOffer(product, now) === (offerStatus === 'active')))
     .sort((a, b) => {
-      if (sort === 'price-asc') return a.unitPrice - b.unitPrice || a.id - b.id;
-      if (sort === 'price-desc') return b.unitPrice - a.unitPrice || a.id - b.id;
-      if (sort === 'newest') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0) || b.id - a.id;
-      if (sort === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0) || a.id - b.id;
       if (sort === 'stock-asc' || sort === 'stock-desc') {
         const physical = Number(b.type === 'PHYSICAL') - Number(a.type === 'PHYSICAL');
         return physical || (a.type === 'PHYSICAL' ? (a.stock - b.stock) * (sort === 'stock-asc' ? 1 : -1) : 0) || a.id - b.id;
       }
-      return a.name.localeCompare(b.name, 'es', { sensitivity: 'base', numeric: true }) || a.id - b.id;
+      const [column, direction] = normalizeTableSort(sort).split('-');
+      const value = product => {
+        if (column === 'type') return product.type === 'PHYSICAL' ? 'Físico' : 'Digital';
+        if (column === 'price') return product.unitPrice;
+        if (column === 'currentPrice') return product.price ?? (hasActiveOffer(product, now) ? product.discountPrice : product.unitPrice);
+        if (column === 'simulatedPrice') return Number(discount) >= 1 && Number(discount) <= 99 ? simulatedPrice(product.unitPrice, discount) : null;
+        if (column === 'expiration') return product.discountPrice > 0 ? dateSortValue(product.discountEndDate) : null;
+        if (column === 'created') return dateSortValue(product.createdAt);
+        return product.name;
+      };
+      return compareTableValues(value(a), value(b), direction) || a.id - b.id;
     });
 }
 export function couponStatus(coupon, now = Date.now()) {
   if (coupon.expirationDate && new Date(coupon.expirationDate).getTime() <= now) return 'expired';
   return coupon.isActive ? 'active' : 'inactive';
 }
+export const couponStatusLabels = { active: 'Activo', expired: 'Vencido', inactive: 'Inactivo' };
+export const couponScope = coupon => `${coupon.productType ? coupon.productType === 'PHYSICAL' ? 'Físico' : 'Digital' : 'Todos los tipos'} · ${coupon.tags?.length ? coupon.tags.join(', ') : 'Todos los tags'}`;
 export function filterCoupons(coupons, status, sort, now = Date.now()) {
   return coupons.filter(coupon => status === 'all' || couponStatus(coupon, now) === status).sort((a, b) => {
-    if (sort === 'expiration-asc' || sort === 'expiration-desc') {
-      if (!a.expirationDate || !b.expirationDate) {
-        if (Boolean(a.expirationDate) !== Boolean(b.expirationDate)) return a.expirationDate ? -1 : 1;
-      } else {
-        const difference = new Date(a.expirationDate) - new Date(b.expirationDate);
-        if (difference) return difference * (sort === 'expiration-asc' ? 1 : -1);
-      }
-    } else {
-      const difference = new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
-      if (difference) return difference * (sort === 'created-asc' ? 1 : -1);
-    }
-    return a.idCoupon - b.idCoupon;
+    const [column, direction] = sort.split('-');
+    const value = coupon => {
+      if (column === 'code') return coupon.code;
+      if (column === 'discount') return coupon.discount;
+      if (column === 'status') return couponStatusLabels[couponStatus(coupon, now)];
+      if (column === 'scope') return couponScope(coupon);
+      if (column === 'cumulative') return Boolean(coupon.cumulative);
+      return dateSortValue(column === 'expiration' ? coupon.expirationDate : coupon.createdAt);
+    };
+    return compareTableValues(value(a), value(b), direction) || a.idCoupon - b.idCoupon;
   });
 }
 export function couponPayload(form) {

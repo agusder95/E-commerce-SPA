@@ -1,68 +1,45 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useCart } from '../../cart/context/useCart';
 import { useAuth } from '../../auth/context/useAuth.js';
-import { getOrderStatus, syncPayment } from '../api/orders';
+import usePaymentOrder from './usePaymentOrder.js';
+import usePaymentExpiry from './usePaymentExpiry.js';
+import { resumeCheckoutTracking } from '../../cart/storage/checkouts.js';
 import { isTerminalStatus, paymentMessage, paymentTitle, MP_CHECKOUT_URL } from '../model/orderStatus';
 
 export default function useCheckoutResult(orderId) {
   const navigate = useNavigate();
-  const { settleCheckout } = useCart();
   const { customerId } = useAuth();
-  const [order, setOrder] = useState(null);
-  const [error, setError] = useState('');
-  const done = !orderId || isTerminalStatus(order?.status);
-  useEffect(() => {
-    if (!orderId || done) return;
-    let active = true;
-    let inFlight = false;
-    let completed = false;
-    let lastSync = null;
-    const controller = new AbortController();
-    let interval;
-    async function poll() {
-      if (inFlight || completed || !active) return;
-      inFlight = true;
-      try {
-        if (lastSync === null || Date.now() - lastSync >= 15000) {
-          lastSync = Date.now();
-          try { await syncPayment(orderId, { signal: controller.signal }); }
-          catch { /* El webhook puede confirmar la orden aunque falle esta consulta. */ }
-        }
-        const next = await getOrderStatus(orderId, { signal: controller.signal });
-        if (!active) return;
-        setOrder(next);
-        setError('');
-        completed = isTerminalStatus(next.status);
-        if (completed) clearInterval(interval);
-      } catch {
-        if (active) setError('No pudimos actualizar el estado del pago. Volveremos a intentarlo automáticamente.');
-      } finally { inFlight = false; }
-    }
-    interval = setInterval(poll, 3000);
-    poll();
-    function visible() { if (document.visibilityState === 'visible') poll(); }
-    window.addEventListener('focus', poll);
-    document.addEventListener('visibilitychange', visible);
-    return () => {
-      active = false; clearInterval(interval); controller.abort();
-      window.removeEventListener('focus', poll);
-      document.removeEventListener('visibilitychange', visible);
-    };
-  }, [orderId, done]);
+  const { order, error, unavailable, retrying, resume } = usePaymentOrder(orderId);
+  const [openingError, setOpeningError] = useState('');
+  const done = !orderId || unavailable || (isTerminalStatus(order?.status) && !retrying);
+  const expiresAt = Date.parse(order?.expiresAt);
+  const expired = usePaymentExpiry(expiresAt);
+  const canPayAgain = !!order?.mercadoPagoPreferenceId && !expired &&
+    !['APPROVED', 'PAID_REQUIRES_REVIEW', 'CANCELLED'].includes(order?.status) && !unavailable;
+  const displayStatus = retrying && order?.status === 'REJECTED' ? 'PENDING_PAYMENT' : order?.status;
 
   useEffect(() => {
     if (order?.status !== 'APPROVED' && order?.status !== 'PAID_REQUIRES_REVIEW') return;
-    settleCheckout(orderId, customerId);
     if (order.status === 'APPROVED') {
       const redirect = setTimeout(() => navigate('/my-purchases'), 2000);
       return () => clearTimeout(redirect);
     }
-  }, [order?.status, orderId, customerId, settleCheckout, navigate]);
+  }, [order?.status, navigate]);
 
-  return { done, title: orderId ? paymentTitle(order?.status) : 'No encontramos el pedido',
-    message: orderId ? paymentMessage(order?.status) : 'Volvé al carrito para iniciar tu compra.', error,
-    total: order?.totalAmount, canPayAgain: !!order?.mercadoPagoPreferenceId && (!done || order.status === 'REJECTED'),
+  return { done, title: orderId && !unavailable ? paymentTitle(displayStatus) : 'No encontramos el pedido',
+    message: unavailable ? 'Revisá el número del pedido o volvé a tus compras.'
+      : orderId ? paymentMessage(displayStatus) : 'Volvé al carrito para iniciar tu compra.', error: openingError || error,
+    total: order?.totalAmount, canPayAgain,
     cancel: () => navigate('/cart'),
-    payAgain: () => { if (order?.mercadoPagoPreferenceId) window.open(MP_CHECKOUT_URL + order.mercadoPagoPreferenceId, '_blank', 'noopener,noreferrer'); } };
+    payAgain: () => {
+      if (!canPayAgain) return;
+      if (expiresAt <= Date.now()) { setOpeningError('El plazo para pagar esta compra venció. Volvé al carrito para iniciar otra.'); return; }
+      setOpeningError('');
+      const paymentTab = window.open('about:blank', '_blank');
+      if (!paymentTab) { setOpeningError('Permití abrir nuevas pestañas para continuar con Mercado Pago.'); return; }
+      paymentTab.opener = null;
+      paymentTab.location.replace(MP_CHECKOUT_URL + encodeURIComponent(order.mercadoPagoPreferenceId));
+      resumeCheckoutTracking(orderId, customerId);
+      resume(expiresAt);
+    } };
 }

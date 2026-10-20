@@ -314,17 +314,41 @@
     min-height: 44px;
 }
 .navbar {
+    --navbar-height: 112px;
     position: sticky;
     top: 0;
     z-index: 100;
     background: #fffffffa;
     border-bottom: 1px solid var(--border);
 }
+.navbar.is-compact {
+    --navbar-height: 76px;
+}
+.navbar .brand-logo {
+    transition: width .2s ease, height .2s ease;
+}
+.navbar:not(.is-compact) .brand-logo {
+    width: 56px;
+    height: 76px;
+}
+.navbar.is-compact .brand-name {
+    display: none;
+}
+.navbar.is-compact .navbar-brand {
+    gap: 0;
+}
+@media (max-width: 480px) {
+    .navbar:not(.is-compact) .brand-logo {
+        width: 38px;
+        height: 56px;
+    }
+}
 .navbar-inner {
     max-width: 1240px;
     margin: auto;
     padding: 0 20px;
-    height: 76px;
+    height: var(--navbar-height);
+    transition: height .2s ease;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -348,7 +372,7 @@
 .navbar-links {
     display: none;
     position: absolute;
-    top: 76px;
+    top: 100%;
     left: 0;
     right: 0;
     background: #fff;
@@ -474,6 +498,7 @@
     align-items: center;
     font-size: 13px;
     margin-bottom: 28px;
+    color: #236e45;
 }
 /* Storefront. */
 .hero {
@@ -1242,6 +1267,11 @@ details p {
     gap: 16px;
 }
 .my-purchases-intro { margin: -8px 0 24px; font-size: 14px; }
+.purchase-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 13px; }
+.purchase-sort > span { margin-right: 4px; }
+.purchase-sort button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: white; color: inherit; font: inherit; cursor: pointer; }
+.purchase-sort button[aria-pressed="true"] { background: var(--primary-light); border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.purchase-sort button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .customer-purchase-summary { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; list-style: none; }
 .customer-purchase-summary::-webkit-details-marker { display: none; }
 .customer-purchase-title { display: grid; gap: 4px; }

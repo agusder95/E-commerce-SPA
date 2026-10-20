@@ -1,94 +1,126 @@
+using System.Globalization;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using PaymentGateway.Application.DTOs;
 using PaymentGateway.Application.Interfaces;
 using PaymentGateway.Domain.Entities;
+using PaymentGateway.Infrastructure.Services;
+using StackExchange.Redis;
 
 namespace PaymentGateway.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AuthController : ControllerBase
+public class AuthController(
+    IPinChallengeStore challenges,
+    IEmailService emailService,
+    ITokenService tokenService,
+    ICustomerRepository customers,
+    PinProof proof,
+    IOptions<PinLoginOptions> options,
+    ILogger<AuthController> logger) : ControllerBase
 {
-    private readonly ICacheService _cacheService;
-    private readonly IEmailService _emailService;
-    private readonly ITokenService _tokenService;
-    private readonly ICustomerRepository _customerRepository;
-
-    // Inyeccion de herramientas de seguridad
-    public AuthController(
-        ICacheService cacheService,
-        IEmailService emailService,
-        ITokenService tokenService,
-        ICustomerRepository customerRepository
-    )
-    {
-        _cacheService = cacheService;
-        _emailService = emailService;
-        _tokenService = tokenService;
-        _customerRepository = customerRepository;
-    }
-
     [HttpPost("request-access")]
     public async Task<IActionResult> RequestAccess([FromBody] GeneratePinRequest request)
     {
+        Response.Headers.CacheControl = "no-store";
         var email = request.Email.Trim().ToLowerInvariant();
-
         if (request.PreviousEmail is not null &&
             string.Equals(email, request.PreviousEmail.Trim(), StringComparison.OrdinalIgnoreCase))
-        {
             return BadRequest(new { Message = "Ingresa un email diferente al anterior." });
+
+        var subject = PinProof.Identifier(email);
+        var challenge = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+        var pin = RandomNumberGenerator.GetInt32(1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+        try
+        {
+            var result = await challenges.TryIssueAsync(subject, Client(), challenge, proof.Create(email, challenge, pin));
+            if (result.Status != PinAttemptStatus.Issued) return Throttled(result);
+        }
+        catch (Exception exception) when (exception is RedisException or TimeoutException)
+        {
+            return Unavailable(exception);
         }
 
-        var pin = new Random().Next(100000, 999999).ToString();
-        var cacheKey = $"PIN_{email}";
-
-        await _cacheService.SetCacheValueAsync(cacheKey, pin, TimeSpan.FromMinutes(5));
-        await _emailService.SendPinEmailAsync(email, pin);
-
-        return Ok(
-            new
+        try
+        {
+            await emailService.SendPinEmailAsync(email, pin);
+        }
+        catch (Exception exception)
+        {
+            // A delayed SMTP failure must never revoke a newer challenge.
+            try { await challenges.RevokeAsync(subject, challenge); }
+            catch (Exception revokeException) when (revokeException is RedisException or TimeoutException)
             {
-                Message = "Si el correo es válido, hemos enviado un PIN de 6 dígitos.",
-                ExpiresIn = "5 minutes",
+                logger.LogWarning("No se pudo revocar un PIN tras un fallo de envío ({ErrorType}).", revokeException.GetType().Name);
             }
-        );
+            return Unavailable(exception);
+        }
+
+        return Ok(new
+        {
+            Message = "Si el correo es válido, hemos enviado un PIN de 6 dígitos.",
+            ExpiresIn = $"{options.Value.LifetimeSeconds / 60.0:0.##} minutes",
+            ExpiresInSeconds = options.Value.LifetimeSeconds,
+            ResendAfterSeconds = options.Value.ResendSeconds
+        });
     }
 
     [HttpPost("verify-access")]
     public async Task<IActionResult> VerifyAccess([FromBody] ValidatePinRequest request)
     {
+        Response.Headers.CacheControl = "no-store";
         var email = request.Email.Trim().ToLowerInvariant();
-        var cacheKey = $"PIN_{email}";
-        var cachedPin = await _cacheService.GetCacheValueAsync(cacheKey);
-
-        // Agrupado por seguridad
-        if (string.IsNullOrEmpty(cachedPin) || cachedPin != request.Pin)
+        var subject = PinProof.Identifier(email);
+        PinAttemptResult result;
+        try
         {
+            var challenge = await challenges.GetChallengeIdAsync(subject);
+            result = await challenges.TryConsumeAsync(subject, Client(), challenge, proof.Create(email, challenge ?? "", request.Pin));
+        }
+        catch (Exception exception) when (exception is RedisException or TimeoutException)
+        {
+            return Unavailable(exception);
+        }
+        if (result.Status == PinAttemptStatus.Throttled) return Throttled(result);
+        if (result.Status != PinAttemptStatus.Verified)
             return BadRequest(new { Message = "El PIN es incorrecto o ha expirado." });
-        }
 
-        // Obtener el ID del cliente
-        var customer = await _customerRepository.GetCustomerByEmailAsync(email);
+        // Redis consumes the challenge atomically BEFORE touching the DB or issuing a token.
+        var customer = await customers.GetCustomerByEmailAsync(email)
+            ?? await customers.CreateCustomerAsync(new Customer { Email = email });
+        var token = tokenService.GenerateToken(email, customer.IdCustomer, customer.Role);
+        return Ok(new { Message = "Autenticación exitosa.", Token = token });
+    }
 
-        if (customer == null)
+    private string Client()
+    {
+        var address = HttpContext.Connection.RemoteIpAddress;
+        if (address?.IsIPv4MappedToIPv6 == true) address = address.MapToIPv4();
+        // Forwarded headers must only be processed by explicitly configured trusted proxies.
+        return PinProof.Identifier(address?.ToString() ?? "unknown");
+    }
+
+    private ObjectResult Throttled(PinAttemptResult result)
+    {
+        var seconds = Math.Max(1, result.RetryAfterSeconds);
+        Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
+        return StatusCode(StatusCodes.Status429TooManyRequests, new
         {
-            var newCustomer = new Customer { Email = email };
+            Code = "PIN_RATE_LIMITED",
+            Message = $"Demasiados intentos. Volvé a intentar en {seconds} segundos.",
+            RetryAfterSeconds = seconds
+        });
+    }
 
-            customer = await _customerRepository.CreateCustomerAsync(newCustomer);
-        }
-
-        // Destruccion de PIN (OTP)
-        await _cacheService.RemoveCacheValueAsync(cacheKey);
-
-        // Generacion de JWT
-        var token = _tokenService.GenerateToken(email, customer.IdCustomer, customer.Role);
-
-        return Ok(
-            new
-            {
-                Message = "Autenticación exitosa.",
-                Token = token, // JWT al frontend
-            }
-        );
+    private ObjectResult Unavailable(Exception exception)
+    {
+        // SMTP/Redis exceptions can contain addresses or credentials; never expose their details.
+        logger.LogWarning("Login por PIN temporalmente no disponible ({ErrorType}).", exception.GetType().Name);
+        return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+        {
+            Code = "PIN_UNAVAILABLE", Message = "No pudimos completar el acceso. Volvé a intentar más tarde."
+        });
     }
 }

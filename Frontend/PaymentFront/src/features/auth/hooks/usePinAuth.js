@@ -17,6 +17,7 @@ export default function usePinAuth() {
     return expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)) : 0;
   });
   const timerRef = useRef(null);
+  const submittingRef = useRef(false);
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,14 +38,23 @@ export default function usePinAuth() {
     return () => clearInterval(timerRef.current);
   }, [step, resendTimer]);
 
-  const startResendTimer = useCallback(() => {
+  const startResendTimer = useCallback((seconds = RESEND_SECONDS) => {
     clearInterval(timerRef.current);
-    setResendTimer(RESEND_SECONDS);
-    localStorage.setItem(PENDING_EMAIL_EXPIRES_KEY, String(Date.now() + RESEND_SECONDS * 1000));
+    setResendTimer(seconds);
+    localStorage.setItem(PENDING_EMAIL_EXPIRES_KEY, String(Date.now() + seconds * 1000));
   }, []);
+
+  function showError(err) {
+    const retryAfter = Number(err.details?.retryAfterSeconds);
+    if (err.status === 429 && Number.isFinite(retryAfter) && retryAfter > 0) {
+      startResendTimer(Math.ceil(retryAfter));
+    }
+    setMessage({ type: "error", text: err.message });
+  }
 
   async function handleRequestPin(e) {
     e.preventDefault();
+    if (submittingRef.current) return;
     const normalizedEmail = email.trim().toLowerCase();
 
     if (requestedEmail && normalizedEmail === requestedEmail) {
@@ -53,37 +63,47 @@ export default function usePinAuth() {
       return;
     }
 
+    submittingRef.current = true;
     setLoading(true);
     setMessage(null);
     setShowReturnToPin(false);
     try {
-      await requestAccess(normalizedEmail, requestedEmail || null);
+      const res = await requestAccess(normalizedEmail, requestedEmail || null);
       setEmail(normalizedEmail);
       setRequestedEmail(normalizedEmail);
       localStorage.setItem(PENDING_EMAIL_KEY, normalizedEmail);
       setStep("pin");
-      startResendTimer();
+      startResendTimer(res.resendAfterSeconds);
       setMessage({ type: "success", text: "PIN enviado. Revisa el mail para verlo." });
     } catch (err) {
-      setMessage({ type: "error", text: err.message });
+      showError(err);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   }
 
   async function handleResend() {
+    if (submittingRef.current || resendTimer > 0) return;
+    submittingRef.current = true;
+    setLoading(true);
     setMessage(null);
     try {
-      await requestAccess(email);
-      startResendTimer();
+      const res = await requestAccess(email);
+      startResendTimer(res.resendAfterSeconds);
       setMessage({ type: "success", text: "PIN reenviado. Revisa el mail para verlo." });
     } catch (err) {
-      setMessage({ type: "error", text: err.message });
+      showError(err);
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
     }
   }
 
   async function handleVerifyPin(e) {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     setMessage(null);
     try {
@@ -92,9 +112,10 @@ export default function usePinAuth() {
       localStorage.removeItem(PENDING_EMAIL_KEY);
       localStorage.removeItem(PENDING_EMAIL_EXPIRES_KEY);
       navigate(location.state?.from || "/", { replace: true });
-    } catch {
-      setMessage({ type: "error", text: "Error: Código incorrecto" });
+    } catch (err) {
+      showError(err);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   }

@@ -9,7 +9,7 @@ test('payment return only identifies the order; payment ID and status never auth
 });
 
 test('invalid return IDs cannot become API paths or verified payment IDs', () => {
-  for (const invalid of ['null', 'undefined', '-1', '0', '1.5', '../orders', '1&admin=true']) {
+  for (const invalid of ['null', 'undefined', '-1', '0', '1.5', '../orders', '1&admin=true', '2147483648', '9007199254740993']) {
     assert.equal(returnOrderId(new URLSearchParams({ orderId: invalid })), null);
   }
 });

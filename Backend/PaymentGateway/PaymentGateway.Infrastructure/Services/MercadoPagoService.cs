@@ -9,18 +9,35 @@ using PaymentGateway.Application.DTOs;
 using PaymentGateway.Application.Interfaces;
 using PaymentGateway.Domain.Entities;
 using Microsoft.Extensions.Configuration;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 namespace PaymentGateway.Infrastructure.Services;
 
 public class MercadoPagoService(IConfiguration config) : IPaymentService
 {
+    private static readonly Meter Metrics = new("PaymentGateway.Payments");
+    private static readonly Counter<long> Requests = Metrics.CreateCounter<long>("payment.provider.requests");
+    private static readonly Counter<long> Failures = Metrics.CreateCounter<long>("payment.provider.failures");
+    private static readonly Histogram<double> Duration = Metrics.CreateHistogram<double>("payment.provider.duration", "ms");
+
+    private static async Task<T> RequestAsync<T>(string operation, Func<Task<T>> request)
+    {
+        var tag = new KeyValuePair<string, object?>("operation", operation);
+        Requests.Add(1, tag);
+        var started = Stopwatch.GetTimestamp();
+        try { return await request(); }
+        catch { Failures.Add(1, tag); throw; }
+        finally { Duration.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds, tag); }
+    }
+
     public async Task<long?> FindPaymentIdForOrderAsync(Order order)
     {
         if (string.IsNullOrWhiteSpace(order.MercadoPagoPreferenceId)) return null;
-        var result = await new MerchantOrderClient().SearchAsync(new SearchRequest {
+        var result = await RequestAsync("search", () => new MerchantOrderClient().SearchAsync(new SearchRequest {
             Limit = 50,
             Filters = new Dictionary<string, object> { ["preference_id"] = order.MercadoPagoPreferenceId }
-        });
+        }));
         return result.Elements.Where(o => o.PreferenceId == order.MercadoPagoPreferenceId &&
                 o.ExternalReference == order.IdOrder.ToString(CultureInfo.InvariantCulture))
             .SelectMany(o => o.Payments ?? [])
@@ -65,13 +82,14 @@ public class MercadoPagoService(IConfiguration config) : IPaymentService
             // Configuracion destino Webhook
             NotificationUrl = webhook,
             Expires = true,
-            ExpirationDateFrom = DateTime.UtcNow,
-            ExpirationDateTo = DateTime.UtcNow.AddMinutes(30),
+            ExpirationDateFrom = order.DatePurchase,
+            ExpirationDateTo = order.ExpiresAt
+                ?? throw new InvalidOperationException("La orden necesita un vencimiento de reserva antes de crear el pago."),
         };
 
         // 3. Usamos el cliente oficial del SDK para crear la preferencia en los servidores de MP
         var client = new PreferenceClient();
-        Preference preference = await client.CreateAsync(request);
+        Preference preference = await RequestAsync("create_preference", () => client.CreateAsync(request));
 
         // 4. Retornamos solo lo que a nuestro negocio y frontend le importa
         return new PaymentPreferenceResponse
@@ -89,7 +107,7 @@ public class MercadoPagoService(IConfiguration config) : IPaymentService
         var client = new PaymentClient();
 
         // Obtencion datos oficiales desde MP
-        Payment payment = await client.GetAsync(paymentId);
+        Payment payment = await RequestAsync("verify", () => client.GetAsync(paymentId));
 
         return new VerifiedPayment(payment.Id, payment.Status, payment.ExternalReference,
             payment.TransactionAmount, payment.CurrencyId, payment.DateApproved?.ToUniversalTime());

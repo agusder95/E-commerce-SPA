@@ -108,7 +108,7 @@ export default function ProductConfirmation({
                             ? "Estos productos dejarán de aparecer en el catálogo. Podés restaurarlos después."
                             : "Estos productos volverán a estar disponibles en el catálogo."}
                     </p>
-                    <ul>
+                    <ul className={confirmation.deleted ? 'product-confirm-deletion' : undefined}>
                         {confirmation.products.map((product) => (
                             <li key={product.id}>
                                 {product.name} · {formatType(product.type)}

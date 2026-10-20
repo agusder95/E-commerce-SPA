@@ -23,14 +23,14 @@ export default function ProductStatistics() {
   const successfulSales = sales.data?.filter(item => item.data) || [];
   const successfulPrices = prices.data?.filter(item => item.data) || [];
   return <section className="admin-panel product-statistics" aria-labelledby="product-statistics-title">
-    <div className="statistics-section-heading"><span className="statistics-eyebrow">MIRÁ CÓMO LE VA A CADA PRODUCTO</span><h2 id="product-statistics-title">Ventas y precios</h2><p>Buscá y elegí hasta 3 productos para comparar sus ventas y precios en el mismo período.</p></div>
+    <div className="statistics-section-heading"><h2 id="product-statistics-title">Ventas y precios</h2><p>Buscá y elegí hasta 3 productos para comparar sus ventas y precios en el mismo período.</p></div>
     {state.productsError ? <QueryError message={`No pudimos cargar los productos. ${state.productsError}`} retry={state.retryProducts} /> : <StatisticsFilters {...state} />}
     {!query && !state.productsError && <div className="statistics-welcome"><IconChartBar size={34} stroke={1.4} aria-hidden="true" />
       {!state.productsLoading && !state.products.length ? <><h3>Todavía no hay productos para consultar</h3><p>Agregá tu primer producto para empezar a registrar sus precios y ventas.</p><Link className="btn-secondary" to="/admin/products">Ir a Productos</Link></>
         : <><h3>Tu próxima consulta empieza acá</h3><p>Elegí entre 1 y 3 productos y presioná «Ver estadísticas». Cada producto tendrá su propio color.</p></>}
     </div>}
     {query && <div className="statistics-results">
-      <header className="statistics-result-heading"><div><span className="statistics-eyebrow">RESULTADO DE LA CONSULTA</span><h3>{multiple ? 'Comparación de productos' : productLabel(query.products[0])}</h3><p>{displayDate(query.from)} al {displayDate(query.to)}</p></div><span className="statistics-time-zone">Fechas de Argentina · ARS</span></header>
+      <header className="statistics-result-heading"><div><h3>{multiple ? 'Comparación de productos' : productLabel(query.products[0])}</h3><p>{displayDate(query.from)} al {displayDate(query.to)}</p></div><span className="statistics-time-zone">Fechas de Argentina · ARS</span></header>
       <ComparisonLegend products={query.products} />
       {sales.loading ? <div className="statistics-loading" role="status">Consultando las ventas…</div> : <>
         {sales.error && <QueryError message={`No pudimos consultar las ventas. ${sales.error}`} retry={retry} />}

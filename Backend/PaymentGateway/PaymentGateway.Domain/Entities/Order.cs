@@ -34,6 +34,12 @@ public class Order
 
     public DateTime? ApprovedAt { get; set; }
 
+    public DateTime? ExpiresAt { get; set; }
+    public DateTime? NextPaymentCheckAt { get; set; }
+    public DateTime? LastPaymentCheckAt { get; set; }
+    public int PaymentCheckAttempts { get; set; }
+    public long? PaymentId { get; set; }
+
     public bool ManuallyCancelled { get; set; }
 
     public string? PreviousStatus { get; set; }

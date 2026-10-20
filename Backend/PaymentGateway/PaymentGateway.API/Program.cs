@@ -1,9 +1,12 @@
-using System.Text;
 using MercadoPago.Config;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
+using PaymentGateway.API.Security;
 using PaymentGateway.Infrastructure.Persistence;
+using PaymentGateway.Application.DTOs;
+using PaymentGateway.Application.Interfaces;
+using PaymentGateway.Infrastructure.Services;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +14,27 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddOptions<PinLoginOptions>()
+    .Bind(builder.Configuration.GetSection(PinLoginOptions.Section))
+    .ValidateDataAnnotations()
+    .Validate(options => options.ResendSeconds <= options.LifetimeSeconds, "ResendSeconds no puede superar LifetimeSeconds.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.RedisKeyPrefix) && !options.RedisKeyPrefix.Contains('{') && !options.RedisKeyPrefix.Contains('}'), "RedisKeyPrefix no debe contener llaves.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+{
+    var redis = ConfigurationOptions.Parse(builder.Configuration.GetConnectionString("RedisConnection")
+        ?? throw new InvalidOperationException("Falta configurar ConnectionStrings:RedisConnection."));
+    redis.AbortOnConnectFail = false;
+    return ConnectionMultiplexer.Connect(redis);
+});
+builder.Services.AddSingleton<PinProof>();
+builder.Services.AddScoped<IPinChallengeStore, RedisPinChallengeStore>();
+builder.Services.AddOptions<PaymentGateway.Infrastructure.Services.PaymentTrackingOptions>()
+    .Bind(builder.Configuration.GetSection(PaymentGateway.Infrastructure.Services.PaymentTrackingOptions.Section))
+    .ValidateDataAnnotations()
+    .Validate(options => options.MaximumCheckSeconds >= options.InitialCheckSeconds,
+        "MaximumCheckSeconds debe ser mayor o igual a InitialCheckSeconds.")
+    .ValidateOnStart();
 builder.Services.AddHttpClient<PaymentGateway.Application.Interfaces.IAssetStorage,
     PaymentGateway.Infrastructure.Services.AssetStorage>();
 
@@ -75,6 +99,8 @@ builder.Services.AddScoped<
     PaymentGateway.Infrastructure.Repositories.ProductRepository
 >();
 
+builder.Services.AddSingleton<PaymentGateway.Infrastructure.Services.OrderWorkSignal>();
+builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.PostgresOrderWorkListener>();
 builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.OrderCleanupService>();
 builder.Services.AddScoped<PaymentGateway.Application.Interfaces.IPaymentReconciliationService,
     PaymentGateway.Infrastructure.Services.PaymentReconciliationService>();
@@ -101,19 +127,7 @@ builder
     .Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        // Definición reglas validacion
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["JwtSettings:Issuer"],
-            ValidAudience = builder.Configuration["JwtSettings:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["JwtSettings:SecretKey"]!)
-            ),
-        };
+        options.TokenValidationParameters = JwtAuthentication.ValidationParameters(builder.Configuration);
     });
 
 // Activación autorizacion global
@@ -140,6 +154,8 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+// Reject an unsafe proof-signing key at startup, before serving login requests.
+_ = app.Services.GetRequiredService<PinProof>();
 
 app.UseMiddleware<PaymentGateway.API.Middleware.ExceptionMiddleware>();
 

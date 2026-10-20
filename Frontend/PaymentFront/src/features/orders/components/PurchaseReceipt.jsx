@@ -4,8 +4,8 @@ import { purchaseReceipt } from '../model/receipt.js';
 export default function PurchaseReceipt({ purchase }) {
   const receipt = purchaseReceipt(purchase);
   return <div className="purchase-receipt" aria-label={`Ticket de la compra ${receipt.orderId}`}>
-    <header className="receipt-heading"><strong className="receipt-brand">forma.</strong><h3>Comprobante de compra</h3>
-      <p>Compra #{receipt.orderId}</p><p>{receipt.date}</p><p>{receipt.status}</p></header>
+    <header className="receipt-heading"><strong className="receipt-brand">Juegos Fueguinos AMB</strong><h3>Comprobante de compra</h3>
+      <p>Compra #{receipt.orderId}</p><p>{receipt.date}</p><p>Hora: {receipt.time} (Arg)</p><p>--- {receipt.status} ---</p></header>
     <ol className="receipt-items">{receipt.items.map((item, index) => <li key={index}>
       <strong>{item.name}</strong><p>{item.type}</p>
       <div className="receipt-row"><span>{item.quantity} × {money(item.unitPrice, 2)}</span><strong>{money(item.total, 2)}</strong></div>
