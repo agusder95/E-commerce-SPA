@@ -1,0 +1,52 @@
+# Dependencies and build output
+**/node_modules/
+**/bin/
+**/obj/
+**/dist/
+**/dist-ssr/
+**/coverage/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/secrets*.json
+**/secrets*.yaml
+**/*secret*
+**/*.pfx
+**/*.p12
+**/*.pem
+**/*.key
+
+# Logs and local data
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.bak
+logs/
+
+# IDE and OS files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.DS_Store
+Thumbs.db
+
+# Test and local HTTP client data
+*.http.user
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

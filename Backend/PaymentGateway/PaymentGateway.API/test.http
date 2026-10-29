@@ -1,0 +1,34 @@
+### 1. Validar el PIN y obtener el Token JWT
+POST http://localhost:5076/api/Auth/verify-access
+Content-Type: application/json
+
+{
+  "email": "userTest@mail.com",
+  "pin": "575448"
+}
+
+> {%
+    // Rider capturará el token de la respuesta y lo guardará en esta variable
+    client.global.set("auth_token", response.body.token);
+%}
+
+### 2. Traspasar el candado y crear la orden
+POST http://localhost:5076/api/Checkout/create-order
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "idCustomer": 4,
+  "items": [
+    {
+      "productName": "Bicicleta",
+      "quantity": 1,
+      "unitPrice": 123456.67
+    }
+  ]
+}
+
+### 3. Consultar Mis Compras (Portal del Cliente)
+GET http://localhost:5076/api/Orders/my-purchases
+Authorization: Bearer {{auth_token}}
+Accept: application/json
