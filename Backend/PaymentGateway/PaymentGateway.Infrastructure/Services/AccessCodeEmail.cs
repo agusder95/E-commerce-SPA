@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace PaymentGateway.Infrastructure.Services;
 
 public sealed record AccessCodeEmail(string Subject, string Text, string Html)
@@ -8,36 +6,17 @@ public sealed record AccessCodeEmail(string Subject, string Text, string Html)
     {
         var duration = lifetimeSeconds % 60 == 0
             ? $"{lifetimeSeconds / 60} minutos" : $"{lifetimeSeconds} segundos";
-        var htmlBody = $@"<!DOCTYPE html>
-<html lang=""es"">
-<head>
-    <meta charset=""UTF-8"">
-    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-    <title>Código de acceso seguro</title>
-</head>
-<body style=""margin:0; padding:0; background-color:#ffffff;"">
-    <div style=""font-family:Arial,sans-serif; padding:20px; color:#333333;"">
-        <h2 style=""color:#2E8B57;"">¡Hola!</h2>
-        <p>Solicitaste acceso al portal para descargar tu manual.</p>
-        <p>Tu código de seguridad es:</p>
-        <div style=""background-color:#f4f4f4; padding:15px; border-radius:8px; display:inline-block;"">
-            <h1 style=""margin:0; color:#333333; letter-spacing:5px;"">{WebUtility.HtmlEncode(pin)}</h1>
-        </div>
-        <p style=""margin-top:20px; font-size:14px; color:#666666;"">
-            Este código expira en {duration}. No lo compartas con nadie.
-        </p>
-    </div>
-</body>
-</html>";
-
-        var textBody = $@"¡Hola!
-
-Solicitaste acceso al portal para descargar tu manual.
-
-Tu código de seguridad es: {pin}
-
-Este código expira en {duration}. No lo compartas con nadie.";
-
-        return new("Tu código de acceso seguro", textBody, htmlBody);
+        var content = $"""
+            <p style="margin:0 0 24px;font-size:15px;color:#59695e;">Usá este código para ingresar a tu cuenta de Juegos Fueguinos AMB.</p>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td align="center" style="padding:24px 12px;background:#edf3ed;border:1px solid #dce5dc;border-radius:10px;">
+            <span style="font-size:11px;color:#526258;">Tu código de acceso</span><br>
+            <strong style="font-family:Arial,Helvetica,sans-serif;font-size:38px;line-height:1.6;letter-spacing:6px;color:#345343;">{EmailLayout.Encode(pin)}</strong>
+            </td></tr></table>
+            <p style="margin:20px 0 0;font-size:13px;color:#59695e;">Este código expira en <strong>{duration}</strong>. No lo compartas con nadie.</p>
+            <p style="margin:14px 0 0;font-size:12px;color:#59695e;">Si no solicitaste este código, podés ignorar este correo.</p>
+            """;
+        var text = $"Juegos Fueguinos AMB\n\nUsá este código para ingresar a tu cuenta.\n\nTu código de seguridad es: {pin}\n\n" +
+            $"Este código expira en {duration}. No lo compartas con nadie.\nSi no solicitaste este código, podés ignorar este correo.\n\n{EmailLayout.ContactText}";
+        return new("Tu código de acceso seguro", text, EmailLayout.Render("Tu código de acceso", "Tu código para ingresar a Juegos Fueguinos AMB.", content));
     }
 }

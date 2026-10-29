@@ -20,6 +20,10 @@ public class ExceptionMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // Cancelling a long status read on tab hide/logout is normal, not a server failure.
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ha ocurrido un error no controlado en la API.");

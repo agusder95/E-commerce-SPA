@@ -17,9 +17,13 @@ export function getMyPendingPurchases(options) {
   return apiFetch("/api/orders/my-purchases-pending", options);
 }
 
-export function getOrderStatus(orderId, options) {
-  return apiFetch(`/api/Order/${orderId}`, options);
+export function getOrderStatus(orderId, { knownStatus, ...options } = {}) {
+  const query = new URLSearchParams({ watch: 'true' });
+  if (knownStatus) query.set('afterStatus', knownStatus);
+  return apiFetch(`/api/Order/${orderId}?${query}`, options);
 }
+
+export const requestPaymentRecovery = orderId => apiFetch(`/api/checkout/orders/${orderId}/recover-payment`, { method: 'POST' });
 
 export function syncPayment(orderId, options = {}) {
   return apiFetch(`/api/checkout/orders/${orderId}/sync-payment`, {

@@ -132,6 +132,11 @@ public class CheckoutController : ControllerBase
                 Message = "La disponibilidad cambió mientras procesábamos tu compra. Revisá el carrito y volvé a intentarlo."
             });
         }
+        catch (PaymentProviderDeferredException ex)
+        {
+            Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling((ex.RetryAt - DateTime.UtcNow).TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+            return StatusCode(503, new { Code = "PAYMENT_BUSY", Message = "El servicio de pagos está ocupado. Volvé a intentar en unos segundos." });
+        }
     }
 
     private async Task<IActionResult> CreateFinalOrderCore(CreateOrderRequest request)
@@ -255,7 +260,11 @@ public class CheckoutController : ControllerBase
             !long.TryParse(signedId[0], NumberStyles.None, CultureInfo.InvariantCulture, out var paymentId) || paymentId <= 0)
             return BadRequest(new { Message = "ID de pago inválido." });
 
-        return PaymentResult(await _reconciliation.ReconcileAsync(paymentId));
+        var identity = payload.Id is { ValueKind: System.Text.Json.JsonValueKind.Number or System.Text.Json.JsonValueKind.String } eventId
+            ? $"{payload.Action}:{eventId}" : $"{payload.Action}:{requestId[0]}:{signature[0]}";
+        await new PaymentWebhookInbox(_db).EnqueueAsync(paymentId, identity, HttpContext.RequestAborted);
+        _logger.LogInformation("Webhook recibido y persistido para el pago {PaymentId}; se verificará en segundo plano.", paymentId);
+        return Ok();
     }
 
     [HttpPost("orders/{orderId:int}/sync-payment")]
@@ -271,6 +280,27 @@ public class CheckoutController : ControllerBase
         // La preferencia guardada decide qué pagos consultar, nunca los IDs/estados del navegador.
         var result = await _reconciliation.ReconcileAsync(null, order);
         return result == PaymentReconciliationResult.Success ? NoContent() : PaymentResult(result);
+    }
+
+    [HttpPost("orders/{orderId:int}/recover-payment")]
+    public async Task<IActionResult> RequestRecovery(int orderId)
+    {
+        if (!int.TryParse(User.FindFirst("idCustomer")?.Value, out var customerId)) return Unauthorized();
+        if (orderId <= 0) return BadRequest();
+        var order = await _db.Orders.AsNoTracking().SingleOrDefaultAsync(o => o.IdOrder == orderId && o.IdCustomer == customerId);
+        if (order is null) return NotFound();
+        var now = DateTime.UtcNow;
+        if (order.Status is not ("Pending" or "PENDING_PAYMENT" or "PAYMENT_PROCESSING" or "REJECTED") ||
+            order.ExpiresAt is null || order.ExpiresAt <= now || string.IsNullOrWhiteSpace(order.MercadoPagoPreferenceId) ||
+            order.FastRecoveryRequestedAt is not null) return NoContent();
+        var due = order.LastPaymentCheckAt is { } last && last.AddSeconds(30) > now ? last.AddSeconds(30) : now;
+        // Shared by every tab/instance. At most two expedited attempts for the lifetime of this order.
+        await _db.Orders.Where(o => o.IdOrder == orderId && o.IdCustomer == customerId && o.FastRecoveryRequestedAt == null &&
+            o.Status != "APPROVED" && o.Status != "PAID_REQUIRES_REVIEW" && o.Status != "CANCELLED")
+            .ExecuteUpdateAsync(u => u.SetProperty(o => o.FastRecoveryRequestedAt, now)
+                .SetProperty(o => o.FastRecoveryRemaining, 2)
+                .SetProperty(o => o.NextPaymentCheckAt, o => o.NextPaymentCheckAt == null || o.NextPaymentCheckAt > due ? due : o.NextPaymentCheckAt));
+        return NoContent();
     }
 
     private IActionResult PaymentResult(PaymentReconciliationResult result) => result switch

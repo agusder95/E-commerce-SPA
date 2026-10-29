@@ -6,7 +6,7 @@ using PaymentGateway.Infrastructure.Persistence;
 
 namespace PaymentGateway.Infrastructure.Services;
 
-// The paid transition and the pending flag are committed together. SMTP failures
+// The paid transition and the pending flag are committed together. email provider failures
 // never roll back a verified payment, and pending messages survive API restarts.
 public sealed class PurchaseEmailService(IServiceScopeFactory scopes, ILogger<PurchaseEmailService> logger, OrderWorkSignal? signal = null)
     : ScheduledOrderWorker(signal ?? new OrderWorkSignal(), logger, TimeSpan.FromSeconds(15))

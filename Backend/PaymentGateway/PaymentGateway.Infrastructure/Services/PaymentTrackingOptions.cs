@@ -14,6 +14,9 @@ public sealed class PaymentTrackingOptions
     [Range(1, 300)] public int CleanupIntervalSeconds { get; set; } = 30;
     [Range(1, 3600)] public int InitialCheckSeconds { get; set; } = 30;
     [Range(1, 3600)] public int MaximumCheckSeconds { get; set; } = 300;
+    [Range(2, 6000)] public int ProviderRequestsPerMinute { get; set; } = 60;
+    [Range(1, 6000)] public int BackgroundRequestsPerMinute { get; set; } = 30;
+    [Range(1, 100)] public int ProviderBurst { get; set; } = 4;
 
     public DateTime TrackingDeadline(Order order) =>
         (order.ExpiresAt ?? order.DatePurchase.AddMinutes(ReservationMinutes)).AddHours(RecoveryHours);

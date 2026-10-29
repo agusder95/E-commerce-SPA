@@ -14,8 +14,10 @@ using System.Diagnostics.Metrics;
 
 namespace PaymentGateway.Infrastructure.Services;
 
-public class MercadoPagoService(IConfiguration config) : IPaymentService
+public class MercadoPagoService(IConfiguration config, PaymentProviderBudget? budget = null, MercadoPago.Http.IHttpClient? transport = null) : IPaymentService
 {
+    private readonly MercadoPago.Http.IHttpClient _inner = transport ?? MercadoPago.Config.MercadoPagoConfig.HttpClient;
+    private MercadoPago.Http.IHttpClient Http => budget is null ? _inner : new BudgetedPaymentHttpClient(_inner, budget);
     private static readonly Meter Metrics = new("PaymentGateway.Payments");
     private static readonly Counter<long> Requests = Metrics.CreateCounter<long>("payment.provider.requests");
     private static readonly Counter<long> Failures = Metrics.CreateCounter<long>("payment.provider.failures");
@@ -27,6 +29,12 @@ public class MercadoPagoService(IConfiguration config) : IPaymentService
         Requests.Add(1, tag);
         var started = Stopwatch.GetTimestamp();
         try { return await request(); }
+        catch (Exception exception) when (exception.GetBaseException() is PaymentProviderDeferredException deferred)
+        {
+            Failures.Add(1, tag);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(deferred).Throw();
+            throw;
+        }
         catch { Failures.Add(1, tag); throw; }
         finally { Duration.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds, tag); }
     }
@@ -34,7 +42,7 @@ public class MercadoPagoService(IConfiguration config) : IPaymentService
     public async Task<long?> FindPaymentIdForOrderAsync(Order order)
     {
         if (string.IsNullOrWhiteSpace(order.MercadoPagoPreferenceId)) return null;
-        var result = await RequestAsync("search", () => new MerchantOrderClient().SearchAsync(new SearchRequest {
+        var result = await RequestAsync("search", () => new MerchantOrderClient(Http).SearchAsync(new SearchRequest {
             Limit = 50,
             Filters = new Dictionary<string, object> { ["preference_id"] = order.MercadoPagoPreferenceId }
         }));
@@ -88,7 +96,7 @@ public class MercadoPagoService(IConfiguration config) : IPaymentService
         };
 
         // 3. Usamos el cliente oficial del SDK para crear la preferencia en los servidores de MP
-        var client = new PreferenceClient();
+        var client = new PreferenceClient(Http);
         Preference preference = await RequestAsync("create_preference", () => client.CreateAsync(request));
 
         // 4. Retornamos solo lo que a nuestro negocio y frontend le importa
@@ -104,7 +112,7 @@ public class MercadoPagoService(IConfiguration config) : IPaymentService
     )
     {
         // Instanciacion cliente pagos MP
-        var client = new PaymentClient();
+        var client = new PaymentClient(Http);
 
         // Obtencion datos oficiales desde MP
         Payment payment = await RequestAsync("verify", () => client.GetAsync(paymentId));

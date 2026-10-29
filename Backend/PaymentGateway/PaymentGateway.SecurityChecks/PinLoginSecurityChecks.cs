@@ -209,12 +209,12 @@ internal static class PinLoginSecurityChecks
             check((await Post("request-access", new { email = lockedEmail })).Code == 429, "PIN HTTP: requesting another code cannot reset a locked account");
 
             mail.Fail = true;
-            var failed = await Post("request-access", new { email = "pin-http-smtp@example.invalid" });
-            check(failed.Code == 503 && !failed.Body.ToString().Contains("private-smtp-detail") &&
-                await store.GetChallengeIdAsync(PinProof.Identifier("pin-http-smtp@example.invalid")) is null, "PIN HTTP: SMTP failure revokes the code without exposing exception details");
+            var failed = await Post("request-access", new { email = "pin-http-email-provider@example.invalid" });
+            check(failed.Code == 503 && !failed.Body.ToString().Contains("private-email-provider-detail") &&
+                await store.GetChallengeIdAsync(PinProof.Identifier("pin-http-email-provider@example.invalid")) is null, "PIN HTTP: email provider failure revokes the code without exposing exception details");
             mail.Fail = false;
-            check((await Post("request-access", new { email = "pin-http-smtp@example.invalid" })).Code == 200,
-                "PIN HTTP: SMTP failure releases resend cooldown for a retry");
+            check((await Post("request-access", new { email = "pin-http-email-provider@example.invalid" })).Code == 200,
+                "PIN HTTP: email provider failure releases resend cooldown for a retry");
 
             var sent = mail.Sent.Count; var customerCount = await CustomerCount();
             store.Fail = true;
@@ -244,7 +244,7 @@ internal static class PinLoginSecurityChecks
         public bool Fail;
         public Task SendPinEmailAsync(string email, string pin)
         {
-            if (Fail) throw new InvalidOperationException("private-smtp-detail");
+            if (Fail) throw new InvalidOperationException("private-email-provider-detail");
             Sent[email] = pin; return Task.CompletedTask;
         }
         public Task SendPurchaseConfirmationAsync(string email, Order order) => throw new NotSupportedException();

@@ -38,6 +38,8 @@ public class Order
     public DateTime? NextPaymentCheckAt { get; set; }
     public DateTime? LastPaymentCheckAt { get; set; }
     public int PaymentCheckAttempts { get; set; }
+    public DateTime? FastRecoveryRequestedAt { get; set; }
+    public int FastRecoveryRemaining { get; set; }
     public long? PaymentId { get; set; }
 
     public bool ManuallyCancelled { get; set; }

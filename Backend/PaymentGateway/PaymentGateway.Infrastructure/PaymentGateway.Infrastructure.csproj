@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Emails/logo.png" LogicalName="PaymentGateway.EmailLogo.png" />
     <ProjectReference Include="..\PaymentGateway.Domain\PaymentGateway.Domain.csproj" />
     <ProjectReference Include="..\PaymentGateway.Application\PaymentGateway.Application.csproj" />
   </ItemGroup>

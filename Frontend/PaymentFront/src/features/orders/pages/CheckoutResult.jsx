@@ -9,7 +9,7 @@ export default function CheckoutResult() {
   return <CheckoutResultContent key={orderId} orderId={orderId} />;
 }
 function CheckoutResultContent({ orderId }) {
-  const { done, title, message, error, total, canPayAgain, cancel, payAgain } = useCheckoutResult(orderId);
+  const { done, title, message, error, total, canPayAgain, payAgainSeconds, cancel, payAgain } = useCheckoutResult(orderId);
   return (
     <div className="page">
       <div className="result-container">
@@ -22,10 +22,11 @@ function CheckoutResultContent({ orderId }) {
         <div className="result-actions">
           {done && <button type="button" className="btn-secondary" onClick={cancel}>Volver al carrito</button>}
           {canPayAgain && (
-            <button className="btn-primary" onClick={payAgain}>
-              Abrir Mercado Pago
+            <button type="button" className="btn-primary" onClick={payAgain} disabled={payAgainSeconds > 0}>
+              Abrir Mercado Pago{payAgainSeconds > 0 ? ` (${payAgainSeconds}s)` : ''}
             </button>
           )}
+          <p style={{ color: 'grey' }}>El pago puede tardar unos minutos en impactar</p>
         </div>
       </div>
     </div>

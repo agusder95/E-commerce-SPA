@@ -24,10 +24,21 @@ public partial class PaymentDbContext : DbContext
     public virtual DbSet<DailyProductSale> DailyProductSales { get; set; }
     public virtual DbSet<DailySale> DailySales { get; set; }
     public virtual DbSet<Tag> Tags { get; set; }
+    public DbSet<PaymentNotification> PaymentNotifications { get; set; }
+    public DbSet<PaymentNotificationEvent> PaymentNotificationEvents { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<PaymentNotification>(entity => {
+            entity.ToTable("PAYMENT_NOTIFICATIONS"); entity.HasKey(e => e.PaymentId);
+            entity.Property(e => e.PaymentId).ValueGeneratedNever();
+            entity.HasIndex(e => e.NextAttemptAt).HasFilter("\"NextAttemptAt\" IS NOT NULL");
+        });
+        modelBuilder.Entity<PaymentNotificationEvent>(entity => {
+            entity.ToTable("PAYMENT_NOTIFICATION_EVENTS"); entity.HasKey(e => e.EventKey);
+            entity.Property(e => e.EventKey).HasMaxLength(64); entity.HasIndex(e => e.ReceivedAt);
+        });
         modelBuilder.Entity<Customer>(entity =>
         {
             entity.HasKey(e => e.IdCustomer).HasName("PK__CUSTOMER__027A27688B2B4CD7");

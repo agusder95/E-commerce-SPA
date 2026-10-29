@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace PaymentGateway.Infrastructure.Persistence;
 
-// Allows migrations without starting SMTP, Redis or Mercado Pago services.
+// Allows migrations without starting an email provider, Redis or Mercado Pago services.
 public sealed class PaymentDbContextFactory : IDesignTimeDbContextFactory<PaymentDbContext>
 {
     public PaymentDbContext CreateDbContext(string[] args)

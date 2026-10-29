@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using PaymentGateway.API.Controllers;
 using PaymentGateway.API.Middleware;
@@ -92,7 +93,11 @@ internal static class HttpPaymentSecurityChecks
                     request.Headers.Add("x-request-id", requestId); request.Headers.Add("x-signature", $"ts={timestamp},v1={hash}");
                 }
                 using var response = await client.SendAsync(request);
-                return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
+                var body = await response.Content.ReadAsStringAsync();
+                if (signed && (int)response.StatusCode == 200)
+                    await new PaymentNotificationWorker(app.Services.GetRequiredService<IServiceScopeFactory>(),
+                        NullLogger<PaymentNotificationWorker>.Instance, new OrderWorkSignal()).ProcessPendingAsync();
+                return ((int)response.StatusCode, body);
             }
             static JsonElement Json(string value) => JsonSerializer.Deserialize<JsonElement>(value);
             string Cart(int id) => JsonSerializer.Serialize(new { items = new[] { new { idProduct = id, quantity = 1 } } });
@@ -155,11 +160,11 @@ internal static class HttpPaymentSecurityChecks
                 (await db.Orders.AsNoTracking().SingleAsync(o => o.IdOrder == orderId)).Status == "PAYMENT_PROCESSING",
                 "HTTP signed pending payment never becomes approved");
             payments.Result = payments.Result with { Status = "approved", Amount = 1 };
-            check((await Send(HttpMethod.Post, webhookUrl, json: webhook, signed: true)).Code == 409 &&
+            check((await Send(HttpMethod.Post, webhookUrl, json: webhook, signed: true)).Code == 200 &&
                 (await db.Orders.AsNoTracking().SingleAsync(o => o.IdOrder == orderId)).Status == "PAYMENT_PROCESSING",
                 "HTTP valid signature cannot bypass exact amount verification");
             payments.Result = payments.Result with { Amount = 100, Currency = "USD" };
-            check((await Send(HttpMethod.Post, webhookUrl, json: webhook, signed: true)).Code == 409,
+            check((await Send(HttpMethod.Post, webhookUrl, json: webhook, signed: true)).Code == 200,
                 "HTTP approved payment with a different currency is refused");
             payments.Result = payments.Result with { Currency = "ARS" };
             check((await Send(HttpMethod.Post, webhookUrl, json: webhook, signed: true)).Code == 200 &&

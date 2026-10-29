@@ -25,6 +25,9 @@ using PaymentGateway.Infrastructure.Services;
 
 const string secret = "security-checks-only-not-a-real-credential";
 var checks = 0;
+EmailTemplateChecks.Run(Check);
+if (args.Contains("--email-previews")) EmailTemplateChecks.WritePreviews("/tmp/juegos-fueguinos-email-previews");
+await ResendEmailChecks.RunAsync(Check);
 var emailOrder = new Order { IdOrder = 42, Status = "APPROVED", TotalAmount = 250m,
     Items = [new() { ProductName = "Manual <especial>", ProductType = "DIGITAL", Quantity = 1, FinalPrice = 50m },
         new() { ProductName = "Libro", ProductType = "PHYSICAL", Quantity = 2, FinalPrice = 100m }] };
@@ -131,16 +134,16 @@ foreach (var id in new[] { "", "0", "-1", "abc", "9223372036854775808" })
 }
 Check(payment.Lookups == 0, "invalid notifications never contact provider or database");
 Sign(controller);
-Check(Code(await controller.ReceiveWebhook(payload)) == 200 && payment.Lookups == 1, "valid independently generated HMAC reaches authenticated lookup");
+Check(Code(await ProcessPaymentAsync(offlineDb, payment)) == 200 && payment.Lookups == 1, "worker verifies the authenticated payment ID against the provider");
 payment.Result = payment.Result with { Id = 124 };
-Check(Code(await controller.ReceiveWebhook(payload)) == 502, "provider must return requested payment ID");
+Check(Code(await ProcessPaymentAsync(offlineDb, payment)) == 502, "provider must return requested payment ID");
 payment.Result = payment.Result with { Id = 123, Status = null };
-Check(Code(await controller.ReceiveWebhook(payload)) == 502, "provider must return payment status");
+Check(Code(await ProcessPaymentAsync(offlineDb, payment)) == 502, "provider must return payment status");
 foreach (var error in new Exception[] { new HttpRequestException(), new TaskCanceledException(),
     new MercadoPagoException("SDK failure", new Exception()), new MercadoPagoApiException("API failure", null!) })
 {
     payment.Failure = error;
-    Check(Code(await controller.ReceiveWebhook(payload)) == 503, "provider error allows retry: " + error.GetType().Name);
+    Check(Code(await ProcessPaymentAsync(offlineDb, payment)) == 503, "provider error allows retry: " + error.GetType().Name);
 }
 payment.Failure = null;
 
@@ -245,22 +248,22 @@ if (args.Contains("--database"))
             verified with { Currency = "ars" }, verified with { Status = "rejected", Amount = 1m } })
         {
             payment.Result = mismatch;
-            Check(Code(await controller.ReceiveWebhook(payload)) == 409, "amount/currency mismatch refused");
+            Check(Code(await ProcessPaymentAsync(db, payment)) == 409, "amount/currency mismatch refused");
             Check((await db.Orders.AsNoTracking().SingleAsync()).Status == "PENDING_PAYMENT" &&
                 (await db.Products.AsNoTracking().SingleAsync()).Stock == 1, "mismatch leaves persisted order and stock unchanged");
         }
         payment.Result = verified;
         order.MercadoPagoPreferenceId = null; await db.SaveChangesAsync();
-        Check(Code(await controller.ReceiveWebhook(payload)) == 409, "order without provider preference refused");
+        Check(Code(await ProcessPaymentAsync(db, payment)) == 409, "order without provider preference refused");
         order.MercadoPagoPreferenceId = "test-preference"; await db.SaveChangesAsync();
         payment.Result = verified with { Status = "pending" };
-        Check(Code(await controller.ReceiveWebhook(payload)) == 200 && order.Status == "PAYMENT_PROCESSING", "pending provider payment cannot approve order");
+        Check(Code(await ProcessPaymentAsync(db, payment)) == 200 && order.Status == "PAYMENT_PROCESSING", "pending provider payment cannot approve order");
         payment.Result = verified with { Status = "rejected" };
-        await controller.ReceiveWebhook(payload); await controller.ReceiveWebhook(payload);
+        await ProcessPaymentAsync(db, payment); await ProcessPaymentAsync(db, payment);
         Check(order.Status == "REJECTED" && product.Stock == 2 && (await db.Products.AsNoTracking().SingleAsync()).Stock == 2,
             "duplicate rejection restores reserved stock exactly once");
         payment.Result = verified;
-        await controller.ReceiveWebhook(payload); await controller.ReceiveWebhook(payload);
+        await ProcessPaymentAsync(db, payment); await ProcessPaymentAsync(db, payment);
         Check(order.Status == "APPROVED" && product.Stock == 1 && (await db.Products.AsNoTracking().SingleAsync()).Stock == 1,
             "late approval reacquires stock exactly once across retries");
         Check(order.ConfirmationEmailPending, "verified approval durably queues the purchase email");
@@ -273,22 +276,22 @@ if (args.Contains("--database"))
         await emailWorker.SendPendingAsync();
         await db.Entry(order).ReloadAsync();
         Check(order.ConfirmationEmailPending && order.ConfirmationEmailSentAt is null && order.Status == "APPROVED",
-            "SMTP failure leaves confirmed payment intact and email available for retry");
+            "email provider failure leaves confirmed payment intact and email available for retry");
         emailSender.Fail = false;
         await emailWorker.SendPendingAsync();
         await db.Entry(order).ReloadAsync();
         Check(!order.ConfirmationEmailPending && order.ConfirmationEmailSentAt is not null && emailSender.Deliveries == 1 &&
             emailSender.Recipient == customer.Email, "purchase confirmation is delivered to the order customer and marked sent");
-        await controller.ReceiveWebhook(payload);
+        await ProcessPaymentAsync(db, payment);
         await emailWorker.SendPendingAsync();
         Check(emailSender.Deliveries == 1, "duplicate approved webhook and worker retry do not resend confirmation");
         payment.Result = verified with { Amount = 1m };
-        Check(Code(await controller.ReceiveWebhook(payload)) == 409, "already approved order still validates payment amount");
+        Check(Code(await ProcessPaymentAsync(db, payment)) == 409, "already approved order still validates payment amount");
         order.Status = "REJECTED"; product.Stock = 0; await db.SaveChangesAsync(); payment.Result = verified;
-        await controller.ReceiveWebhook(payload);
+        await ProcessPaymentAsync(db, payment);
         Check(order.Status == "PAID_REQUIRES_REVIEW" && product.Stock == 0, "late paid order without stock requires manual review");
         payment.Result = verified with { ExternalReference = int.MaxValue.ToString(CultureInfo.InvariantCulture) };
-        Check(Code(await controller.ReceiveWebhook(payload)) == 404, "unknown order never created by webhook");
+        Check(Code(await ProcessPaymentAsync(db, payment)) == 404, "unknown order never created by webhook");
 
         // Use persisted state across each call, just as separate HTTP requests do.
         db.ChangeTracker.Clear();
@@ -358,9 +361,13 @@ if (args.Contains("--database"))
             customer.IdCustomer, Check);
         await HttpPaymentSecurityChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
             customer.IdCustomer, Check);
+        await PaymentLatencyChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options, customer.IdCustomer, Check);
         if (args.Contains("--redis"))
+        {
+            await PaymentBudgetChecks.RunAsync(local.GetConnectionString("RedisConnection") ?? throw new InvalidOperationException("Configure Redis."), Check);
             await PinLoginSecurityChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
                 local.GetConnectionString("RedisConnection") ?? throw new InvalidOperationException("Configure ConnectionStrings__RedisConnection."), Check);
+        }
         await OrderWorkNotificationChecks.RunAsync(new DbContextOptionsBuilder<PaymentDbContext>().UseNpgsql(builder.ConnectionString).Options,
             customer.IdCustomer, Check);
     }
@@ -403,6 +410,16 @@ static void Sign(CheckoutController controller, string id = "123", string signin
     controller.Request.Headers["x-request-id"] = requestId;
     controller.Request.Headers["x-signature"] = $"ts={timestamp},v1={signature}";
 }
+static async Task<IActionResult> ProcessPaymentAsync(PaymentDbContext db, IPaymentService payments)
+{
+    var result = await new PaymentReconciliationService(new OrderRepository(db), payments, db,
+        NullLogger<PaymentReconciliationService>.Instance).ReconcileAsync(123);
+    return result switch { PaymentReconciliationResult.Success => new OkResult(),
+        PaymentReconciliationResult.Unavailable => new StatusCodeResult(503),
+        PaymentReconciliationResult.InvalidProviderResponse => new StatusCodeResult(502),
+        PaymentReconciliationResult.NotFound => new NotFoundResult(), _ => new ConflictResult() };
+}
+
 sealed class FakeEmail : IEmailService
 {
     public bool Fail { get; set; }
@@ -411,7 +428,7 @@ sealed class FakeEmail : IEmailService
     public Task SendPinEmailAsync(string toEmail, string pin) => throw new InvalidOperationException("No PIN expected.");
     public Task SendPurchaseConfirmationAsync(string toEmail, Order order)
     {
-        if (Fail) throw new InvalidOperationException("Simulated SMTP failure.");
+        if (Fail) throw new InvalidOperationException("Simulated email provider failure.");
         Deliveries++; Recipient = toEmail;
         return Task.CompletedTask;
     }

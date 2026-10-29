@@ -9,7 +9,7 @@ Para configurar productos físicos/digitales, Cloudinary y Cloudflare R2, seguir
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - Una cuenta de Mercado Pago para probar pagos y webhooks
-- Un proveedor SMTP o una cuenta de Gmail con contraseña de aplicación
+- Una cuenta de [Resend](https://resend.com) y un dominio verificado para enviar correos
 - [ngrok](https://ngrok.com/) para recibir webhooks durante el desarrollo local
 
 ## Estructura
@@ -37,7 +37,7 @@ cp PaymentGateway.API/appsettings.Development.example.json \
    PaymentGateway.API/appsettings.Development.json
 ```
 
-Completar `appsettings.Development.json` con las cadenas de conexión, el token de Mercado Pago, una clave JWT de al menos 32 caracteres y la configuración SMTP. Los archivos locales están excluidos por Git. Nunca subir tokens, contraseñas ni claves privadas.
+Completar `appsettings.Development.json` con las cadenas de conexión, el token de Mercado Pago, una clave JWT de al menos 32 caracteres y la configuración de Resend. Los archivos locales están excluidos por Git. Nunca subir tokens, contraseñas ni claves privadas.
 
 La clave del token es `MercadoPago:AccessToken` (con dos letras s en Access), o `MercadoPago__AccessToken` como variable de entorno. En Development se utilizan las credenciales de prueba. La antigua clave `AccesToken` se acepta por compatibilidad únicamente si `AccessToken` no está definida. Si el token falta o está vacío, la API detiene el arranque con un error de configuración; no se aprueban pagos de forma local.
 
@@ -48,6 +48,56 @@ Host=localhost;Port=5432;Database=Order_Customer;Username=paymentgateway;Passwor
 ```
 
 La API ejecutada con Docker usa `Host=postgres-db`. Las fechas se almacenan como `timestamp with time zone`; usar valores UTC al guardar fechas desde .NET.
+
+## Correos con Resend
+
+El backend usa `POST https://api.resend.com/emails` para los PIN y las confirmaciones de compra, conservando las plantillas HTML y texto. Ya no usa SMTP, puertos de correo ni contraseñas de aplicación. No se necesita instalar otro paquete.
+
+Cada confirmación se envía al cliente y en copia oculta (BCC) a `juegosfueguinosamb@gmail.com`, dentro de la misma petición y con la misma clave de idempotencia. Los PIN sólo se envían a quien solicita el acceso. Si la compra pertenece al correo de la tienda, no se duplica ese destinatario. La copia permite a la tienda consultar productos, importes y el email del cliente en el encabezado del correo.
+
+Los correos de acceso y compra comparten un diseño adaptable con los colores de la tienda, el aviso «No respondas a este mensaje» y el contacto `juegosfueguinosamb@gmail.com`. El logo se incluye como recurso embebido del backend (`PaymentGateway.Infrastructure/Emails/logo.png`) y se adjunta mediante CID, por lo que no requiere un frontend público para mostrarse. Si se cambia el logo, reemplazar también ese recurso y recompilar. Cada versión incluye texto plano. Algunos clientes de correo pueden bloquear imágenes según sus preferencias.
+
+En `PaymentGateway.API/appsettings.Development.json`, reemplazar `EmailSettings` por:
+
+```json
+"Resend": {
+  "ApiKey": "re_tu-api-key",
+  "FromEmail": "notificaciones@tu-dominio-verificado.com",
+  "FromName": "Juegos Fueguinos AMB",
+  "ReplyTo": "contacto@tu-dominio.com"
+}
+```
+
+También se puede configurar con variables de entorno del proceso o del servicio API en Docker:
+
+```text
+Resend__ApiKey=re_tu-api-key
+Resend__FromEmail=notificaciones@tu-dominio-verificado.com
+Resend__FromName=Juegos Fueguinos AMB
+Resend__ReplyTo=contacto@tu-dominio.com
+```
+
+`ReplyTo` es opcional: omitirlo si no se necesita. La API valida la configuración al iniciar. La API key debe permanecer exclusivamente en el backend; no colocarla en variables `VITE_*`. El archivo `.env` de Compose no se exporta automáticamente al proceso .NET local: usar el JSON local, user secrets o variables de entorno reales. Si se eligen variables para Docker, agregarlas a `paymentgateway-api.environment` en `compose.yaml`.
+
+Crear una API key con permiso de envío y [verificar el dominio remitente en Resend](https://resend.com/docs/dashboard/domains/introduction). Para pruebas iniciales se puede usar `onboarding@resend.dev`, con las restricciones de destinatario del dominio de prueba. Para clientes reales usar un remitente del dominio verificado.
+
+Los errores de Resend no exponen cuerpos del proveedor ni credenciales al cliente. Un fallo al enviar el PIN conserva la respuesta 503 y revoca el desafío correspondiente. Las confirmaciones continúan pendientes para que el worker las reintente cada 15 segundos sin revertir el pago. Cada confirmación usa la clave `purchase-confirmation/<orderId>` para los reintentos del mismo contenido; [Resend conserva estas claves durante 24 horas](https://resend.com/docs/dashboard/emails/idempotency-keys). Si se cambia el contenido de un mensaje pendiente después de que Resend lo aceptó, el proveedor puede rechazar la reutilización de su clave con HTTP 409. La deduplicación de Resend no es indefinida. Una respuesta aceptada por la API no garantiza la entrega en la bandeja del destinatario.
+
+Si aparece HTTP 403, el backend registra un código de diagnóstico y una explicación propia, sin imprimir el mensaje bruto de Resend:
+
+- `sender_domain_not_verified`: verificar el dominio y configurar un `FromEmail` de ese dominio. Una cuenta personal de Gmail, Outlook u otro proveedor público no es un dominio propio que puedas verificar.
+- `testing_recipient_restricted`: con `onboarding@resend.dev` sólo se puede enviar al correo de la cuenta de Resend. Para clientes reales hace falta un dominio verificado.
+- `invalid_permission`, `restricted_api_key` o `suspended_api_key`: revisar permisos de envío, dominio autorizado y estado de la API key.
+- `validation_error` o `unclassified_error`: consultar el detalle del rechazo en el dashboard de Resend. No compartir la API key ni cuerpos completos con datos de clientes.
+
+Después de cambiar la configuración, reiniciar la API y solicitar un PIN nuevo. Un envío rechazado no deja válido el código que se intentó mandar.
+
+Las pruebas del transporte usan un `HttpMessageHandler` simulado: verifican autenticación, destinatarios, HTML/texto, claves de idempotencia, fallos HTTP y respuestas inválidas, sin enviar correos:
+
+```bash
+dotnet build Backend/PaymentGateway/PaymentGateway.SecurityChecks --no-restore -m:1
+dotnet run --project Backend/PaymentGateway/PaymentGateway.SecurityChecks --no-build --no-restore
+```
 
 ## Ejecutar la infraestructura
 
@@ -89,7 +139,7 @@ dotnet ef migrations add NombreDelCambio \
   --startup-project PaymentGateway.API
 ```
 
-La fábrica de contexto para migraciones lee `ConnectionStrings__DefaultConnection`; no necesita iniciar los servicios de Mercado Pago, SMTP ni Redis.
+La fábrica de contexto para migraciones lee `ConnectionStrings__DefaultConnection`; no necesita iniciar los servicios de Mercado Pago, Resend ni Redis.
 
 ## Webhook de Mercado Pago
 
@@ -101,9 +151,11 @@ ngrok http 5076
 
 Configurar `Store:WebhookUrl` con `https://<tu-túnel>/api/checkout/webhook` y `Store:FrontendUrl` con la URL del frontend. En **Tus integraciones → Webhooks** de Mercado Pago, configurar esa misma URL para eventos de pagos y copiar la clave secreta en `MercadoPago:WebhookSecret` (o `MercadoPago__WebhookSecret`). Es una clave distinta del `AccessToken`; también se exige en Development. No compartirla ni subirla al repositorio.
 
-Sin esa clave, crear órdenes y recibir notificaciones de pagos devuelve **503**, sin reservar stock ni generar preferencias. El checkout también valida `Store:WebhookUrl` antes de acceder a la base: una URL faltante, sin HTTPS o que apunte a localhost devuelve **503** con un mensaje de configuración, en lugar de fallar después de insertar la orden. Si cambia la dirección del túnel, actualizar `Store:WebhookUrl` y mantener ngrok abierto durante las pruebas. El resto de la API puede funcionar. El webhook valida `x-signature`, `x-request-id` y el parámetro de query `data.id` con el SDK oficial; el ID del cuerpo debe coincidir. Luego consulta el pago mediante el token del servidor y verifica ID, referencia interna, importe exacto (`transaction_amount`) y moneda **ARS** contra la orden guardada, antes de modificar su estado o stock. Nunca se aprueba una compra por los parámetros de retorno del navegador.
+Sin esa clave, crear órdenes y recibir notificaciones de pagos devuelve **503**, sin reservar stock ni generar preferencias. El checkout también valida `Store:WebhookUrl` antes de acceder a la base: una URL faltante, sin HTTPS o que apunte a localhost devuelve **503** con un mensaje de configuración, en lugar de fallar después de insertar la orden. Si cambia la dirección del túnel, actualizar `Store:WebhookUrl` y mantener ngrok abierto durante las pruebas. El resto de la API puede funcionar. El webhook valida `x-signature`, `x-request-id` y el parámetro de query `data.id` con el SDK oficial; el ID del cuerpo debe coincidir. Después guarda el aviso y responde 200 sin consultar al proveedor. `PaymentNotificationWorker` consulta el pago mediante el token del servidor y verifica ID, referencia interna, importe exacto (`transaction_amount`) y moneda **ARS** contra la orden guardada, antes de modificar su estado o stock. Nunca se aprueba una compra por los parámetros de retorno del navegador.
 
-Firma inválida: **401**; ID/cuerpo inconsistente: **400**; importe/moneda incorrectos u orden sin preferencia: **409**; respuesta del proveedor inconsistente: **502**; proveedor no disponible: **503**. Los errores no confirman recepción a Mercado Pago y permiten sus reintentos. Las notificaciones repetidas de órdenes ya aprobadas no vuelven a descontar stock. No se impone una ventana de antigüedad a la firma: los reintentos consultan el estado actual del pago. Reembolsos, contracargos y pagos divididos requieren un flujo adicional de conciliación y no forman parte de esta validación.
+Firma inválida: **401**; ID/cuerpo inconsistente: **400**. Los avisos válidos se aceptan con **200** sólo después de persistir; un fallo de almacenamiento no confirma recepción. Los fallos del proveedor se reintentan desde la cola durable, y las incompatibilidades de importe/moneda/referencia quedan registradas sin aprobar la compra. Las notificaciones repetidas de órdenes ya aprobadas no vuelven a descontar stock. No se impone una ventana de antigüedad a la firma: los reintentos consultan el estado actual del pago. Reembolsos, contracargos y pagos divididos requieren un flujo adicional de conciliación y no forman parte de esta validación.
+
+La implementación actual, límites por credencial, recuperación acotada y despliegue están documentados en [PAYMENT-LATENCY.md](PAYMENT-LATENCY.md).
 
 ### Pago aprobado que sigue pendiente
 
@@ -125,7 +177,7 @@ Los valores están en la sección `PaymentTracking` de `appsettings.json` y pued
 
 Aplicá `PaymentTrackingSchedule` antes de iniciar esta versión. La migración conserva los 30 minutos de las preferencias emitidas anteriormente y programa la recuperación de órdenes pendientes existentes. Las canceladas/rechazadas históricas fuera de la ventana no reinician consultas. Las pruebas `PaymentGateway.SecurityChecks -- --database` verifican esta actualización, los intervalos, el límite por lote, la coordinación entre conexiones, los pagos tardíos y la liberación única de stock.
 
-El frontend comparte el seguimiento del carrito y la pantalla de resultado y consulta únicamente `GET /api/order/{id}` con intervalos crecientes (3 a 30 segundos), pausando al ocultar la pestaña o perder conexión. Este endpoint filtra por usuario en PostgreSQL, devuelve un resumen sin ítems e incluye `expiresAt` para evitar reabrir preferencias vencidas. No llama al proveedor. El cierre de sesión detiene las solicitudes del navegador y deja funcionando el proceso del servidor.
+El frontend comparte el seguimiento del carrito y la pantalla de resultado. `GET /api/order/{id}?watch=true&afterStatus=...` espera hasta 20 segundos por cambios notificados desde PostgreSQL y responde inmediatamente al cambiar el estado, pausando al ocultar la pestaña o perder conexión. Ante errores o backends antiguos mantiene la espera creciente de 3 a 30 segundos. Este endpoint filtra por usuario en PostgreSQL, devuelve un resumen sin ítems e incluye `expiresAt` para evitar reabrir preferencias vencidas. No llama al proveedor. El cierre de sesión detiene las solicitudes del navegador y deja funcionando el proceso del servidor.
 
 `POST /api/checkout/orders/{orderId}/sync-payment` permanece disponible como recuperación autenticada y respeta la misma planificación persistida: una petición adelantada devuelve **204** sin consultar Mercado Pago. No acepta IDs ni estados de pago del navegador. Sólo el dueño puede solicitarlo; devuelve **204** al completar o diferir, **404** si no le pertenece y **409** si el pago no coincide con referencia, importe y moneda. El frontend ya no lo ejecuta periódicamente. La autenticación de este endpoint no reemplaza la firma de los webhooks públicos.
 
@@ -152,6 +204,7 @@ La segunda opción lee la conexión local de `PaymentGateway.API/appsettings.Dev
 | `POST` | `/api/checkout/create-order` | JWT | Crea una orden y preferencia de pago |
 | `POST` | `/api/checkout/validate-coupon` | JWT | Valida un único cupón y calcula descuentos sin crear órdenes ni reservar stock |
 | `POST` | `/api/checkout/webhook` | No | Recibe notificaciones de Mercado Pago |
+| `POST` | `/api/checkout/orders/{orderId}/recover-payment` | JWT | Programa como máximo dos verificaciones aceleradas de una orden propia |
 | `POST` | `/api/checkout/orders/{orderId}/sync-payment` | JWT | Reconcilia el pago consultando al proveedor |
 | `GET` | `/api/admin/statistics/products/{id}/sales?from=2026-10-01&to=2026-10-31&groupBy=day` | Admin | Unidades e importe vendido por producto y período |
 | `GET` | `/api/admin/statistics/products/{id}/prices?from=2026-10-01&to=2026-10-31` | Admin | Intervalos de precios de lista y ofertas |
@@ -208,7 +261,7 @@ Los valores de `PinLogin` en `PaymentGateway.API/appsettings.json` controlan:
 | Envíos por correo / IP en la ventana | 5 / 20 |
 | Verificaciones por correo / IP en la ventana | 20 / 100 |
 
-Los límites se comparten entre instancias y sobreviven a reinicios de la API mientras Redis conserve sus datos. Cambiar mayúsculas o IP no elimina el límite del correo. También se cuentan verificaciones de códigos inexistentes. Durante un bloqueo no se puede enviar otro PIN para reiniciar los intentos. Un error de SMTP revoca sólo su propio desafío y libera la espera de reenvío, pero conserva los presupuestos de solicitudes. Si Redis falla se devuelve **503**; el login no permite continuar sin verificación.
+Los límites se comparten entre instancias y sobreviven a reinicios de la API mientras Redis conserve sus datos. Cambiar mayúsculas o IP no elimina el límite del correo. También se cuentan verificaciones de códigos inexistentes. Durante un bloqueo no se puede enviar otro PIN para reiniciar los intentos. Un error del proveedor de correo revoca sólo su propio desafío y libera la espera de reenvío, pero conserva los presupuestos de solicitudes. Si Redis falla se devuelve **503**; el login no permite continuar sin verificación.
 
 **429** devuelve `Retry-After`, `code: PIN_RATE_LIMITED` y `retryAfterSeconds`. **503** devuelve `code: PIN_UNAVAILABLE`, sin detalles internos. La solicitud exitosa informa `expiresInSeconds` y `resendAfterSeconds`. El frontend usa este último y muestra los mensajes del servidor. Las respuestas del login llevan `Cache-Control: no-store`.
 
@@ -216,7 +269,7 @@ La IP se toma de la conexión. El código no confía directamente en `X-Forwarde
 
 No requiere migración de PostgreSQL. Al actualizar, los PIN emitidos por la implementación anterior dejan de aceptarse y debe solicitarse uno nuevo. Reiniciar la API y publicar el frontend actualizado para activar los cambios.
 
-Pruebas con Redis real, servidor HTTP temporal y PostgreSQL temporal, sin SMTP externo:
+Pruebas con Redis real, servidor HTTP temporal y PostgreSQL temporal, sin enviar correos reales:
 
 ```bash
 dotnet run --project Backend/PaymentGateway/PaymentGateway.SecurityChecks --no-restore -m:1 -- --database --redis
@@ -227,8 +280,8 @@ Se requiere `ConnectionStrings:RedisConnection` además de la conexión PostgreS
 ## Servicios principales
 
 - `MercadoPagoService`: crea preferencias y consulta pagos.
-- `SmtpEmailService`: envía los PIN y las confirmaciones de compra por SMTP.
-- `PurchaseEmailService`: despierta al recibir confirmaciones pendientes de pagos verificados, registra el envío y reintenta los fallos de SMTP cada 15 segundos mientras haya trabajo. Sin correos pendientes espera notificaciones de la base. Las órdenes anteriores a la migración no generan correos retroactivos.
+- `ResendEmailService`: envía los PIN y las confirmaciones de compra por la API HTTPS de Resend.
+- `PurchaseEmailService`: despierta al recibir confirmaciones pendientes de pagos verificados, registra el envío y reintenta los fallos de envío cada 15 segundos mientras haya trabajo. Sin correos pendientes espera notificaciones de la base. Las órdenes anteriores a la migración no generan correos retroactivos.
 - `RedisPinChallengeStore`: guarda pruebas HMAC de los PIN y aplica consumo único, límites y bloqueos mediante scripts atómicos de Redis.
 - `JwtTokenService`: genera tokens JWT.
 - `OrderCleanupService`: cancela órdenes pendientes antiguas.
@@ -237,7 +290,7 @@ Se requiere `ConnectionStrings:RedisConnection` además de la conexión PostgreS
 
 Las confirmaciones incluyen productos, cantidades, importes y un enlace a `/my-purchases` en `Store:FrontendUrl` (usá la URL pública de la tienda al publicar). Si hay productos físicos, indican entrega presencial y enlazan a la cuenta configurada en `Store:InstagramUrl`, actualmente `https://www.instagram.com/brandoni.andrea/`. Sin sesión, el enlace abre el login y regresa a Mis compras después de verificar el PIN.
 
-Aplicá las migraciones pendientes, incluidas `PaymentTrackingSchedule` y `OrderWorkNotifications`, antes de iniciar la API actualizada:
+Aplicá las migraciones pendientes, incluidas `PaymentTrackingSchedule`, `OrderWorkNotifications` y `DurablePaymentNotifications`, antes de iniciar la API actualizada:
 
 ```bash
 dotnet ef database update --project PaymentGateway.Infrastructure --startup-project PaymentGateway.API

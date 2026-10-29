@@ -34,6 +34,8 @@ builder.Services.AddOptions<PaymentGateway.Infrastructure.Services.PaymentTracki
     .ValidateDataAnnotations()
     .Validate(options => options.MaximumCheckSeconds >= options.InitialCheckSeconds,
         "MaximumCheckSeconds debe ser mayor o igual a InitialCheckSeconds.")
+    .Validate(options => options.BackgroundRequestsPerMinute < options.ProviderRequestsPerMinute,
+        "El presupuesto de respaldo debe reservar solicitudes para avisos y checkouts.")
     .ValidateOnStart();
 builder.Services.AddHttpClient<PaymentGateway.Application.Interfaces.IAssetStorage,
     PaymentGateway.Infrastructure.Services.AssetStorage>();
@@ -57,10 +59,11 @@ builder.Services.AddStackExchangeRedisCache(options =>
 });
 
 //Contenedor de Dependencias de pago
-builder.Services.AddScoped<
-    PaymentGateway.Application.Interfaces.IPaymentService,
-    PaymentGateway.Infrastructure.Services.MercadoPagoService
->();
+builder.Services.AddSingleton<PaymentProviderBudget>();
+builder.Services.AddHttpClient("MercadoPago", client => client.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddScoped<IPaymentService>(services => new MercadoPagoService(builder.Configuration,
+    services.GetRequiredService<PaymentProviderBudget>(),
+    new MercadoPago.Http.DefaultHttpClient(services.GetRequiredService<IHttpClientFactory>().CreateClient("MercadoPago"))));
 
 //Registro Repositorio (Interfaz -> Implementación)
 builder.Services.AddScoped<
@@ -78,10 +81,14 @@ builder.Services.AddScoped<
     PaymentGateway.Infrastructure.Services.RedisCacheService
 >();
 
-builder.Services.AddScoped<
-    PaymentGateway.Application.Interfaces.IEmailService,
-    PaymentGateway.Infrastructure.Services.SmtpEmailService
->();
+builder.Services.AddOptions<ResendOptions>()
+    .Bind(builder.Configuration.GetSection(ResendOptions.Section))
+    .ValidateDataAnnotations()
+    .Validate(options => !string.IsNullOrWhiteSpace(options.ApiKey) && options.ApiKey.StartsWith("re_") &&
+        !options.ApiKey.Any(char.IsWhiteSpace) && !options.ApiKey.Contains("replace", StringComparison.OrdinalIgnoreCase),
+        "Configurá Resend:ApiKey con una API key válida de Resend.")
+    .ValidateOnStart();
+builder.Services.AddHttpClient<IEmailService, ResendEmailService>(client => client.Timeout = TimeSpan.FromSeconds(15));
 
 //JWT
 builder.Services.AddScoped<
@@ -105,6 +112,7 @@ builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.OrderCl
 builder.Services.AddScoped<PaymentGateway.Application.Interfaces.IPaymentReconciliationService,
     PaymentGateway.Infrastructure.Services.PaymentReconciliationService>();
 builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.PaymentReconciliationWorker>();
+builder.Services.AddHostedService<PaymentNotificationWorker>();
 builder.Services.AddHostedService<PaymentGateway.Infrastructure.Services.PurchaseEmailService>();
 
 // CONFIGURACION M.P.

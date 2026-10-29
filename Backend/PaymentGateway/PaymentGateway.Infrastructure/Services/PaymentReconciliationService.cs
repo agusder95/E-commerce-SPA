@@ -25,6 +25,7 @@ public sealed class PaymentReconciliationService(IOrderRepository orders, IPayme
         {
             if (paymentId is null) return PaymentReconciliationResult.Success;
             try { verified = await payments.VerifyPaymentStatusAsync(paymentId.Value); }
+            catch (PaymentProviderDeferredException) { throw; }
             catch (Exception exception) when (IsProviderFailure(exception))
             {
                 logger.LogWarning(exception, "No se pudo verificar el webhook del pago {PaymentId}.", paymentId);
@@ -55,9 +56,11 @@ public sealed class PaymentReconciliationService(IOrderRepository orders, IPayme
         await db.Orders.Where(o => o.IdOrder == current.IdOrder).ExecuteUpdateAsync(update => update
             .SetProperty(o => o.LastPaymentCheckAt, now)
             .SetProperty(o => o.PaymentCheckAttempts, attempts)
+            .SetProperty(o => o.FastRecoveryRemaining, o => o.FastRecoveryRemaining > 0 ? o.FastRecoveryRemaining - 1 : 0)
             .SetProperty(o => o.NextPaymentCheckAt, now.Add(_tracking.Delay(attempts))));
 
         var result = PaymentReconciliationResult.Unavailable;
+        DateTime? deferredUntil = null;
         try
         {
             // Only reuse IDs while their payment remains in progress; rejected payments may be retried.
@@ -68,6 +71,7 @@ public sealed class PaymentReconciliationService(IOrderRepository orders, IPayme
                 await orders.CancelOrdersAsync([current]);
             return result;
         }
+        catch (PaymentProviderDeferredException ex) { deferredUntil = ex.RetryAt; return result; }
         catch (Exception exception) when (exception.GetBaseException() is PostgresException
             { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected })
         {
@@ -84,6 +88,9 @@ public sealed class PaymentReconciliationService(IOrderRepository orders, IPayme
                 !(latest.ManuallyCancelled && latest.PreviousStatus is "APPROVED" or "PAID_REQUIRES_REVIEW")
                 ? completedAt.Add(_tracking.Delay(attempts, result != PaymentReconciliationResult.Success)) : null;
             if (!PaymentTrackingOptions.IsAwaitingPayment(latest) && next > _tracking.TrackingDeadline(latest)) next = _tracking.TrackingDeadline(latest);
+            if (next is not null && deferredUntil is not null) next = deferredUntil;
+            if (next is not null && latest.FastRecoveryRemaining > 0 && deferredUntil is null && next > completedAt.AddSeconds(30))
+                next = completedAt.AddSeconds(30);
             // Ensure the final unpaid check is due at the reservation deadline, not five minutes later.
             if (next is not null && PaymentTrackingOptions.IsAwaitingPayment(latest) && latest.ExpiresAt > completedAt && next > latest.ExpiresAt)
                 next = latest.ExpiresAt;
@@ -108,6 +115,7 @@ public sealed class PaymentReconciliationService(IOrderRepository orders, IPayme
             if (paymentId is null) return PaymentReconciliationResult.Success; // La preferencia todavía no tiene pagos.
             payment = verified ?? await payments.VerifyPaymentStatusAsync(paymentId.Value);
         }
+        catch (PaymentProviderDeferredException) { throw; }
         catch (Exception exception) when (exception is MercadoPagoException or MercadoPagoApiException or HttpRequestException or TaskCanceledException)
         {
             logger.LogWarning("No se pudo consultar el pago {PaymentId} en Mercado Pago para la orden {OrderId}: HTTP {ProviderStatus}, {ErrorType}; se requiere reintento.",
@@ -201,7 +209,8 @@ public sealed class PaymentReconciliationService(IOrderRepository orders, IPayme
         // Persistencia nuevo estado
         await orders.UpdateOrderAsync(order);
         await transaction.CommitAsync();
-        logger.LogInformation("Pago {PaymentId} verificado para la orden {OrderId}: {OrderStatus}.", paymentId, orderId, order.Status);
+        logger.LogInformation("Pago {PaymentId} verificado para la orden {OrderId}: {OrderStatus}; aprobación proveedor {ApprovedAt}; persistido {PersistedAt}.",
+            paymentId, orderId, order.Status, order.ApprovedAt, DateTime.UtcNow);
 
         // Confirmacion de recepcion a MP
         return PaymentReconciliationResult.Success;
