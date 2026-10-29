@@ -11,8 +11,8 @@
   let visibility = 'visible'; let online = true; let purchases = []; let opened = 0;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const assert = (condition, label) => { if (!condition) throw new Error(label); passed.push(label); };
-  const waitFor = async (condition, label) => {
-    const until = Date.now() + 5000;
+  const waitFor = async (condition, label, timeout = 5000) => {
+    const until = Date.now() + timeout;
     while (!condition()) { if (Date.now() >= until) throw new Error(label); await sleep(25); }
   };
   const emitReceipts = () => window.dispatchEvent(new Event('paymentfront:checkouts-changed'));
@@ -113,7 +113,10 @@
     login(7); navigate('/checkout/result?orderId=43');
     await waitFor(() => document.body.innerText.includes('Pago rechazado'), 'Rejected result');
     const retry = [...document.querySelectorAll('button')].find(button => button.textContent.includes('Abrir Mercado Pago'));
-    assert(Boolean(retry), 'Unexpired rejected payment can be retried'); retry.click();
+    assert(Boolean(retry) && retry.disabled, 'Unexpired rejected payment has an initial reopen cooldown');
+    await waitFor(() => !retry.disabled, 'Reopen cooldown finishes after 30 seconds', 33000);
+    retry.click();
+    await waitFor(() => retry.disabled, 'Payment retry restarts the reopen cooldown');
     await waitFor(() => document.body.innerText.includes('Esperando tu pago'), 'Retry continues observing the prior rejection');
     assert(opened === 1 && !JSON.parse(localStorage.getItem('paymentfront.checkouts'))[0].trackingStopped,
       'Explicit retry resumes the shared tracking without creating another order');
@@ -132,8 +135,8 @@
     navigate('/checkout/result?orderId=404');
     await waitFor(() => document.body.innerText.includes('No encontramos este pedido'), 'Unavailable order result');
     assert(!document.querySelector('.spinner'), 'Unavailable orders show an error and stop the waiting spinner');
-    assert(calls.every(call => call.method === 'GET' && !call.path.includes('sync-payment')),
-      'Frontend status tracking never forces provider synchronization');
+    assert(calls.every(call => call.method === 'GET' || (call.method === 'POST' && call.path.endsWith('/recover-payment'))),
+      'Frontend only reads status or schedules bounded recovery; it never forces provider synchronization');
     window.paymentQAReport = { passed, paymentRequests: statusCalls().length, providerSyncRequests: 0 };
     return window.paymentQAReport;
   } finally {

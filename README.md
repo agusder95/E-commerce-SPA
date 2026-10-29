@@ -25,7 +25,7 @@ Aplicación de comercio electrónico para la venta de productos digitales. El pr
 - [Node.js](https://nodejs.org/) 20 o superior y npm.
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) para PostgreSQL y Redis.
-- Una cuenta de Mercado Pago y un proveedor SMTP para probar el flujo completo.
+- Una cuenta de Mercado Pago y Resend para probar el flujo completo.
 
 ## Estructura del repositorio
 
@@ -89,7 +89,7 @@ La configuración local del Backend utiliza archivos que no deben subirse al rep
 - `Backend/PaymentGateway/.env`
 - `Backend/PaymentGateway/PaymentGateway.API/appsettings.Development.json`
 
-Usar los archivos `.example` incluidos como plantilla. No subir tokens de Mercado Pago, contraseñas SMTP, claves JWT ni credenciales de bases de datos.
+Usar los archivos `.example` incluidos como plantilla. No subir tokens de Mercado Pago, API keys de Resend, claves JWT ni credenciales de bases de datos.
 
 ## Desarrollo
 

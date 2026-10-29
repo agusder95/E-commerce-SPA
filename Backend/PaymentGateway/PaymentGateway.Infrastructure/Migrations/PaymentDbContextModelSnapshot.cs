@@ -233,6 +233,12 @@ namespace PaymentGateway.Infrastructure.Migrations
                     b.Property<DateTime?>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("FastRecoveryRemaining")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("FastRecoveryRequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<decimal>("GlobalDiscount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("decimal(18, 2)")
@@ -378,6 +384,59 @@ namespace PaymentGateway.Infrastructure.Migrations
                     b.HasIndex("IdProduct");
 
                     b.ToTable("ORDER_ITEMS", (string)null);
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.PaymentNotification", b =>
+                {
+                    b.Property<long>("PaymentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("FirstReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("LastReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("ProcessedVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("PaymentId");
+
+                    b.HasIndex("NextAttemptAt")
+                        .HasFilter("\"NextAttemptAt\" IS NOT NULL");
+
+                    b.ToTable("PAYMENT_NOTIFICATIONS", (string)null);
+                });
+
+            modelBuilder.Entity("PaymentGateway.Domain.Entities.PaymentNotificationEvent", b =>
+                {
+                    b.Property<string>("EventKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("PaymentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("EventKey");
+
+                    b.HasIndex("ReceivedAt");
+
+                    b.ToTable("PAYMENT_NOTIFICATION_EVENTS", (string)null);
                 });
 
             modelBuilder.Entity("PaymentGateway.Domain.Entities.Product", b =>

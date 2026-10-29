@@ -158,3 +158,20 @@ test('explicit retry keeps observing an earlier rejection until payment changes 
   expired.resume(43, time.now() + 1000); await time.advance(3000);
   assert.equal(expired.getSnapshot(43).retrying, false); assert.equal(time.count(), 0); expired.stop();
 });
+
+test('live status waits for a database notification without delaying the next read or creating parallel requests', async () => {
+  const time = clock(); const waiting = deferred(); let reads = 0; let confirmed = 0;
+  const tracker = createPaymentTracker({ ...time, getOrderStatus: async (id, options) => {
+    reads++;
+    if (reads === 1) return { ...pending(id), live: true };
+    assert.equal(options.knownStatus, 'PENDING_PAYMENT');
+    return waiting.promise;
+  }, onConfirmed: () => confirmed++ });
+  tracker.setTrackedOrders([42]); tracker.subscribe(42, () => {}); tracker.start();
+  await time.advance(0);
+  assert.equal(reads, 2); assert.equal(time.count(), 0);
+  await time.advance(30000); assert.equal(reads, 2);
+  waiting.resolve({ idOrder: 42, status: 'APPROVED', live: true }); await flush();
+  assert.equal(confirmed, 1); assert.equal(tracker.getSnapshot(42).order.status, 'APPROVED');
+  assert.equal(time.count(), 0); tracker.stop();
+});

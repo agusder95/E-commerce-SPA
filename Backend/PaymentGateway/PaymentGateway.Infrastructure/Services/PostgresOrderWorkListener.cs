@@ -23,9 +23,10 @@ public sealed class PostgresOrderWorkListener(IConfiguration config, OrderWorkSi
             command.CommandText = """
                 SELECT EXISTS (SELECT 1 FROM pg_trigger
                     WHERE tgrelid = '"ORDERS"'::regclass AND tgname = 'order_work_changed' AND NOT tgisinternal)
+                AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'payment_inbox_changed' AND NOT tgisinternal)
                 """;
             if (await command.ExecuteScalarAsync(cancellationToken) is not true)
-                throw new InvalidOperationException("Aplicá la migración OrderWorkNotifications antes de iniciar la API.");
+                throw new InvalidOperationException("Aplicá las migraciones OrderWorkNotifications y DurablePaymentNotifications antes de iniciar la API.");
             connection.Notification += (_, _) => signal.Pulse();
             command.CommandText = "LISTEN paymentgateway_order_work";
             await command.ExecuteNonQueryAsync(cancellationToken);

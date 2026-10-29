@@ -49,7 +49,7 @@ public class AuthController(
         }
         catch (Exception exception)
         {
-            // A delayed SMTP failure must never revoke a newer challenge.
+            // A delayed email provider failure must never revoke a newer challenge.
             try { await challenges.RevokeAsync(subject, challenge); }
             catch (Exception revokeException) when (revokeException is RedisException or TimeoutException)
             {
@@ -116,7 +116,7 @@ public class AuthController(
 
     private ObjectResult Unavailable(Exception exception)
     {
-        // SMTP/Redis exceptions can contain addresses or credentials; never expose their details.
+        // Email provider/Redis exceptions can contain addresses or credentials; never expose their details.
         logger.LogWarning("Login por PIN temporalmente no disponible ({ErrorType}).", exception.GetType().Name);
         return StatusCode(StatusCodes.Status503ServiceUnavailable, new
         {

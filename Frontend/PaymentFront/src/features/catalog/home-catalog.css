@@ -8,7 +8,7 @@
 .storefront-home .carousel-controls button { display: inline-flex; align-items: center; justify-content: center; border-color: #dce5dc; background: white; border-radius: 9px; color: #345343; }
 .storefront-home .carousel-controls button:hover { background: #edf3ed; border-color: #a7b7a9; }
 /* .storefront-home .home-carousel .home-catalog-section-icon { background: #edf3ed; } */
-.storefront-home .home-carousel-frame { min-width: 0; border: 1px solid #dce5dc; border-radius: 16px; background: #f7f9f5; overflow: hidden; }
+.storefront-home .home-carousel-frame { min-width: 0; border: 1px solid #dce5dc; border-radius: 16px; /* background: #f7f9f5; */ overflow: hidden; }
 .storefront-home .home-carousel .product-carousel { position: relative; margin: 0; padding: 24px; gap: 28px; scroll-padding-inline: 24px; scrollbar-width: none; }
 .storefront-home .home-carousel .product-carousel::-webkit-scrollbar { display: none; }
 .storefront-home .home-carousel-footer { display: flex; align-items: center; gap: 22px; margin: 0 24px; padding: 16px 0; border-top: 1px solid #dce5dc; }
@@ -23,7 +23,7 @@
 .storefront-home #all-title:focus-visible { outline: 2px solid #345343; outline-offset: 6px; border-radius: 4px; }
 .storefront-home .section-empty { padding: 24px; border: 1px dashed #dce5dc; border-radius: 10px; background: #f7f9f5; color: #59695e; font-size: 13px; line-height: 1.8; }
 .storefront-home .catalog-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 24px; border: 1px solid #dce5dc; border-radius: 14px; background: #f7f9f5; }
-.storefront-home .catalog-filter-panel { margin: 0; padding: 0; border: 1px solid #dce5dc; border-radius: 14px; background: #f7f9f5; }
+.storefront-home .catalog-filter-panel { margin: 0; padding: 0; border: 1px solid #dce5dc; border-radius: 14px;  }
 .storefront-home .catalog-filter-toggle { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 60px; padding: 16px 24px; list-style: none; color: #345343; font-size: 13px; font-weight: 500; cursor: pointer; border-radius: 14px; }
 .storefront-home .catalog-filter-toggle::-webkit-details-marker { display: none; }
 .storefront-home .catalog-filter-toggle > svg { flex-shrink: 0; }

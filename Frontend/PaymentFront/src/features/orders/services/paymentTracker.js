@@ -48,7 +48,7 @@ export function createPaymentTracker({ getOrderStatus, onConfirmed = () => {}, o
     entry.lastRequest = now();
     let failed = false;
     try {
-      const order = await getOrderStatus(entry.id, { signal: controller.signal });
+      const order = await getOrderStatus(entry.id, { signal: controller.signal, knownStatus: entry.snapshot.order?.status });
       if (!current(entry, controller)) return;
       if (Number(order?.idOrder) !== entry.id || typeof order.status !== 'string') throw new Error('Invalid order response');
       if (entry.snapshot.order?.status !== order.status) entry.attempts = 0;
@@ -73,7 +73,8 @@ export function createPaymentTracker({ getOrderStatus, onConfirmed = () => {}, o
       if (current(entry, controller)) {
         entry.controller = null;
         entry.attempts++;
-        const delay = Math.min(3000 * 2 ** Math.min(entry.attempts - 1, 5) * (failed ? 2 : 1), failed ? 60000 : 30000);
+        const delay = !failed && entry.snapshot.order?.live ? 0
+          : Math.min(3000 * 2 ** Math.min(entry.attempts - 1, 5) * (failed ? 2 : 1), failed ? 60000 : 30000);
         entry.due = now() + delay;
         schedule(entry);
       }

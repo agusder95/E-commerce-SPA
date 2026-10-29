@@ -47,6 +47,7 @@ public sealed class PaymentReconciliationWorker(IServiceScopeFactory scopes, ILo
                 var db = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
                 var order = await db.Orders.AsNoTracking().SingleOrDefaultAsync(o => o.IdOrder == id, cancellationToken);
                 if (order is null || order.Status is "APPROVED" or "PAID_REQUIRES_REVIEW") continue;
+                using var priority = order.FastRecoveryRemaining > 0 ? PaymentRequestPriority.Urgent() : null;
                 var result = await scope.ServiceProvider.GetRequiredService<IPaymentReconciliationService>().ReconcileAsync(null, order);
                 if (result != PaymentReconciliationResult.Success)
                     logger.LogWarning("No se pudo conciliar la orden {OrderId}: {Result}; se reintentará.", id, result);
