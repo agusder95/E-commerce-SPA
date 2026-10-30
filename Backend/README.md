@@ -277,6 +277,36 @@ dotnet run --project Backend/PaymentGateway/PaymentGateway.SecurityChecks --no-r
 
 Se requiere `ConnectionStrings:RedisConnection` además de la conexión PostgreSQL de desarrollo. Las pruebas sólo eliminan claves de su prefijo aleatorio; no ejecutan `FLUSHDB`.
 
+## Migraciones automáticas en Railway
+
+El Dockerfile genera `/app/efbundle`, un ejecutable de migraciones para Linux x64,
+y lo incluye en la imagen final. La generación utiliza una conexión ficticia:
+no se conecta a PostgreSQL ni necesita secretos durante el build. La ejecución
+lee `ConnectionStrings__DefaultConnection` de las variables de Railway.
+
+En el servicio **API**, configurar:
+
+- **Root Directory:** `/Backend/PaymentGateway`.
+- **Dockerfile:** `PaymentGateway.API/Dockerfile`.
+- **Variables:** `ASPNETCORE_ENVIRONMENT=Production` y
+  `ConnectionStrings__DefaultConnection` con la conexión privada de PostgreSQL.
+- **Settings → Deploy → Pre-Deploy Command:** `/app/efbundle`.
+- **Pre-Deploy Timeout:** `300` segundos, ajustable al tamaño de futuras migraciones.
+- **Start Command:** dejar vacío para usar el arranque del Dockerfile.
+
+Railway ejecuta las migraciones antes de iniciar la nueva API, dentro de la red
+privada. No requiere TCP Proxy ni acceso público a PostgreSQL. Si el comando
+falla, el despliegue se detiene; revisar los logs de pre-deploy antes de reintentar.
+Una segunda ejecución aplica solamente las migraciones pendientes; no importa
+el catálogo ni los datos locales. Revisar los cambios y respaldar la base antes
+de futuras migraciones sobre datos reales.
+
+Los archivos `.env*` y `appsettings.Development.json` se excluyen del contexto de
+Docker. Las credenciales de producción se configuran exclusivamente en Railway.
+
+Referencias: [Pre-deploy en Railway](https://docs.railway.com/deployments/pre-deploy-command)
+y [bundles de EF Core](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying).
+
 ## Servicios principales
 
 - `MercadoPagoService`: crea preferencias y consulta pagos.
