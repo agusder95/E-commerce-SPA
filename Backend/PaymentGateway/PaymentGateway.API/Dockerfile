@@ -19,7 +19,21 @@ FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
 RUN dotnet publish "./PaymentGateway.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
+FROM build AS migrations
+WORKDIR /src
+RUN dotnet tool restore
+# Generate the artifact without connecting to a database or using production secrets.
+RUN ASPNETCORE_ENVIRONMENT=Production \
+    ConnectionStrings__DefaultConnection="Host=localhost;Database=build_only;Username=build_only;Password=build_only" \
+    dotnet ef migrations bundle \
+    --project PaymentGateway.Infrastructure \
+    --startup-project PaymentGateway.API \
+    --configuration Release \
+    --target-runtime linux-x64 \
+    --output /app/efbundle
+
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+COPY --from=migrations --chmod=755 /app/efbundle ./efbundle
 ENTRYPOINT ["dotnet", "PaymentGateway.API.dll"]
